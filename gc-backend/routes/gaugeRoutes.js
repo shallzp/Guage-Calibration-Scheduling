@@ -1,0 +1,371 @@
+const express = require('express');
+const Gauge = require('../models/gauge/Gauge');
+
+const { sanitizeGaugePatch, normalizeScheduleStatus, parseDateValue } = require('../utils/gaugeUtils');
+
+const { normalizeStakeholdersPayload, hydrateStakeholders } = require('../utils/stakeholderUtils');
+const { computeRiskSummary } = require('../utils/riskUtils');
+const { computeBatchKeys, computeGaugeDates, syncBatchCollections } = require('../utils/batchUtils');
+
+const router = express.Router();
+
+
+// get all gauges
+router.get('/', async (req, res) => {
+  try {
+    const gauges = await Gauge.find({});
+    res.json(gauges);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+
+// ***** stakeholders *****
+
+// get stakeholders for a gauge
+router.get('/stakeholders', async (req, res) => {
+  try {
+    const gaugeKey = String(req.query.gaugeKey || '').trim();
+    if (!gaugeKey) {
+      return res.status(400).json({ message: 'gaugeKey query param is required.' });
+    }
+
+    const gauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    if (!gauge) {
+      return res.status(404).json({ message: 'Gauge not found.' });
+    }
+
+    const stakeholders = await hydrateStakeholders(gauge.stakeholders || {});
+    return res.json(stakeholders);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// update stakeholders for a gauge
+router.put('/stakeholders', async (req, res) => {
+  try {
+    const gaugeKey = String(req.query.gaugeKey || '').trim();
+    if (!gaugeKey) {
+      return res.status(400).json({ message: 'gaugeKey query param is required.' });
+    }
+
+    const stakeholders = normalizeStakeholdersPayload(req.body || {});
+
+    const updatedGauge = await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      {
+        $set: {
+          stakeholders: {
+            operators: stakeholders.operators,
+            supervisors: stakeholders.supervisors,
+          },
+        },
+      },
+      { returnDocument: 'after', runValidators: true },
+    ).lean();
+
+    if (!updatedGauge) {
+      return res.status(404).json({ message: 'Gauge not found.' });
+    }
+
+    const hydrated = await hydrateStakeholders(updatedGauge.stakeholders || {});
+    return res.json(hydrated);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+
+// ***** gauge by key operations *****
+
+// get a single gauge by gauge_key
+router.get('/:gaugeKey', async (req, res) => {
+  try {
+    const gaugeKey = decodeURIComponent(String(req.params.gaugeKey || '').trim());
+    if (!gaugeKey) {
+      return res.status(400).json({ message: 'gaugeKey path param is required.' });
+    }
+
+    const gauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    if (!gauge) {
+      return res.status(404).json({ message: 'Gauge not found.' });
+    }
+
+    return res.json(gauge);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// update a gauge by gauge_key
+router.patch('/:gaugeKey', async (req, res) => {
+  try {
+    const gaugeKey = decodeURIComponent(String(req.params.gaugeKey || '').trim());
+    if (!gaugeKey) {
+      return res.status(400).json({ message: 'gaugeKey path param is required.' });
+    }
+
+    const patch = sanitizeGaugePatch(req.body || {}, { normalizeStakeholdersPayload });
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ message: 'No allowed fields provided for update.' });
+    }
+
+    if (Array.isArray(patch.schedule_table) && patch.schedule_table.some((row) => !row.due_date)) {
+      return res.status(400).json({ message: 'Each schedule row must include a valid due_date.' });
+    }
+
+    // Read existing gauge to get old batch_keys for batch collection sync if schedule is updated
+    const existingGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    if (!existingGauge) {
+      return res.status(404).json({ message: 'Gauge not found.' });
+    }
+
+    let updatedGauge = await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      { $set: patch },
+      { returnDocument: 'after', runValidators: true },
+    ).lean();
+
+    // If schedule_table was updated, recompute batch_keys, gaugeDates and sync
+    if (patch.schedule_table) {
+      const batchKeys = computeBatchKeys(updatedGauge.schedule_table);
+      const gaugeDates = computeGaugeDates(updatedGauge.schedule_table);
+      
+      updatedGauge = await Gauge.findOneAndUpdate(
+        { gauge_key: gaugeKey },
+        {
+          $set: {
+            batch_keys: batchKeys,
+            due_date: gaugeDates.due_date,
+            last_completion_date: gaugeDates.last_completion_date
+          }
+        },
+        { returnDocument: 'after' },
+      ).lean();
+      
+      syncBatchCollections(gaugeKey, existingGauge.batch_keys, batchKeys).catch((err) =>
+        console.error('syncBatchCollections (PATCH gauge) error:', err),
+      );
+    }
+
+    return res.json(updatedGauge);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+
+// ***** schedule table *****
+
+// append a new schedule row to a gauge's schedule_table
+router.post('/:gaugeKey/schedule', async (req, res) => {
+  try {
+    const gaugeKey = decodeURIComponent(String(req.params.gaugeKey || '').trim());
+    if (!gaugeKey) {
+      return res.status(400).json({ message: 'gaugeKey path param is required.' });
+    }
+
+    const gauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    if (!gauge) {
+      return res.status(404).json({ message: 'Gauge not found.' });
+    }
+
+    const rows = Array.isArray(gauge.schedule_table) ? gauge.schedule_table : [];
+    const frequency = Number(gauge.frequency) || 0;
+
+    if (frequency <= 0) {
+      return res.status(400).json({ message: 'Gauge frequency must be > 0 to append a schedule row.' });
+    }
+
+    // Compute next due_date from the last row
+    let nextDueDate;
+    if (rows.length > 0) {
+      const lastDue = new Date(rows[rows.length - 1].due_date);
+      lastDue.setMonth(lastDue.getMonth() + frequency);
+      nextDueDate = lastDue;
+    } else {
+      nextDueDate = new Date();
+    }
+
+    const nextId = rows.length > 0
+      ? Math.max(...rows.map((r) => Number(r.schedule_id) || 0)) + 1
+      : 1;
+
+    const newRow = {
+      schedule_id: nextId,
+      due_date: nextDueDate,
+      completion_date: null,
+      status: 'not-started',
+    };
+
+    // Push the new row first
+    const afterPush = await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      { $push: { schedule_table: newRow } },
+      { returnDocument: 'after', runValidators: true },
+    ).lean();
+
+    // Recompute batch_keys and root dates from the full updated schedule
+    const batchKeys = computeBatchKeys(afterPush.schedule_table);
+    const gaugeDates = computeGaugeDates(afterPush.schedule_table);
+    const updated = await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      {
+        $set: {
+          batch_keys: batchKeys,
+          due_date: gaugeDates.due_date,
+          last_completion_date: gaugeDates.last_completion_date
+        }
+      },
+      { returnDocument: 'after' },
+    ).lean();
+
+    // Sync current_batches / previous_batches based on what changed
+    syncBatchCollections(gaugeKey, gauge.batch_keys, batchKeys).catch((err) =>
+      console.error('syncBatchCollections (POST schedule) error:', err),
+    );
+
+    return res.status(201).json(updated);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// update a single schedule row (status, completion_date, and/or due_date)
+router.patch('/:gaugeKey/schedule/:scheduleId', async (req, res) => {
+  try {
+    const gaugeKey = decodeURIComponent(String(req.params.gaugeKey || '').trim());
+    const scheduleId = Number(req.params.scheduleId);
+
+    if (!gaugeKey) {
+      return res.status(400).json({ message: 'gaugeKey path param is required.' });
+    }
+    if (!Number.isFinite(scheduleId) || scheduleId < 1) {
+      return res.status(400).json({ message: 'scheduleId must be a positive integer.' });
+    }
+
+    const { status, completion_date, due_date } = req.body || {};
+    if (!status && due_date === undefined) {
+      return res.status(400).json({ message: 'At least one of status or due_date is required.' });
+    }
+
+
+    // Read existing gauge to get old batch_keys for batch collection sync
+    const existingGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    if (!existingGauge) {
+      return res.status(404).json({ message: 'Gauge not found.' });
+    }
+
+    const existingRow = (existingGauge.schedule_table || []).find(
+      (row) => Number(row.schedule_id) === scheduleId,
+    );
+
+    const setFields = {};
+
+    if (status) {
+      setFields['schedule_table.$[row].status'] = normalizeScheduleStatus(status);
+      setFields['schedule_table.$[row].completion_date'] = parseDateValue(completion_date ?? null);
+    }
+
+    if (due_date !== undefined) {
+      const parsedDueDate = parseDateValue(due_date);
+      setFields['schedule_table.$[row].due_date'] = parsedDueDate;
+    }
+
+    // Apply status / due_date changes to the schedule row
+    const afterUpdate = await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      { $set: setFields },
+      {
+        returnDocument: 'after',
+        runValidators: true,
+        arrayFilters: [{ 'row.schedule_id': scheduleId }],
+      },
+    ).lean();
+
+    if (!afterUpdate) {
+      return res.status(404).json({ message: 'Gauge not found.' });
+    }
+
+    // Recompute the full batch_keys map and root dates from the updated schedule
+    const batchKeys = computeBatchKeys(afterUpdate.schedule_table);
+    const gaugeDates = computeGaugeDates(afterUpdate.schedule_table);
+    const updated = await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      {
+        $set: {
+          batch_keys: batchKeys,
+          due_date: gaugeDates.due_date,
+          last_completion_date: gaugeDates.last_completion_date
+        }
+      },
+      { returnDocument: 'after' },
+    ).lean();
+
+    // Sync current_batches / previous_batches based on what changed
+    syncBatchCollections(gaugeKey, existingGauge.batch_keys, batchKeys).catch((err) =>
+      console.error('syncBatchCollections (PATCH schedule) error:', err),
+    );
+
+    return res.json(updated);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+
+// ***** risk data *****
+
+// returns a summary of risk levels across all gauges, including counts and percentages for each risk level
+router.get('/risk/summary', async (req, res) => {
+  try {
+    const gauges = await Gauge.find(
+      { gauge_key: { $exists: true } },
+      { 'latest_prediction.risk_level': 1, _id: 0 },
+    ).lean();
+
+    return res.json(computeRiskSummary(gauges));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// returns the risk score and level for a gauge identified by gauge_key
+router.get('/risk/gauge/:gaugeKey', async (req, res) => {
+  try {
+    const gaugeKey = decodeURIComponent(String(req.params.gaugeKey || '').trim());
+    if (!gaugeKey) {
+      return res.status(400).json({ message: 'gaugeKey path param is required.' });
+    }
+
+    const gauge = await Gauge.findOne(
+      { gauge_key: gaugeKey },
+      {
+        _id: 0,
+        gauge_key: 1,
+        gauge_id: 1,
+        'latest_prediction.risk_score': 1,
+        'latest_prediction.risk_level': 1,
+      },
+    ).lean();
+
+    if (!gauge) {
+      return res.status(404).json({ message: `Gauge not found: ${gaugeKey}` });
+    }
+
+    const prediction = gauge.latest_prediction || {};
+    const resolvedKey = String(gauge.gauge_key || gauge.gauge_id || gaugeKey).trim();
+
+    return res.json({
+      gauge_key: resolvedKey,
+      risk_score: prediction.risk_score ?? null,
+      risk_level: prediction.risk_level ?? null,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+module.exports = router;

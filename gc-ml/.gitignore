@@ -1,0 +1,9 @@
+.env
+
+# to ignore _pycache__in all folders
+**/__pycache__/*  
+
+/venv/*
+
+/app/ml/recommender.py
+/app/ml/trainer.py
