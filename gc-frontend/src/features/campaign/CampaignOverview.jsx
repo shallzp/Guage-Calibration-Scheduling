@@ -1,6 +1,6 @@
 import SummaryTable from './SummaryTable'
 
-function CampaignOverview({ campaignOverviewRows }) {
+function CampaignOverview({ campaignOverviewRows, clearFilterTrigger, onSortChange }) {
     const extraColumns = [
         { header: 'Start Date', key: 'startDate' },
         { header: 'End Date', key: 'endDate' },
@@ -17,6 +17,8 @@ function CampaignOverview({ campaignOverviewRows }) {
                 firstColumnLabel="Campaign Type"
                 extraColumns={extraColumns}
                 rows={campaignOverviewRows}
+                clearFilterTrigger={clearFilterTrigger}
+                onSortChange={onSortChange}
             />
         </div>
     )

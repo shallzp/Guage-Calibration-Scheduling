@@ -69,6 +69,30 @@ function computeGaugeDates(scheduleRows) {
 }
 
 /**
+ * Derives the top-level gauge status from schedule_table.
+ *
+ * Rules (rows sorted by schedule_id ascending):
+ *   - status of the row immediately after last completed  → that row's status
+ *   - no row after last completed                         → 'completed'
+ *   - no completed row at all                             → first row's status
+ */
+function computeGaugeStatus(scheduleRows) {
+  if (!Array.isArray(scheduleRows) || scheduleRows.length === 0) return null;
+
+  const sorted = [...scheduleRows].sort((a, b) => Number(a.schedule_id) - Number(b.schedule_id));
+
+  let lastCompletedIdx = -1;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    if (sorted[i].status === 'completed') { lastCompletedIdx = i; break; }
+  }
+
+  if (lastCompletedIdx === -1) return sorted[0].status;          // no completed row
+  const nextIdx = lastCompletedIdx + 1;
+  if (nextIdx >= sorted.length) return 'completed';              // nothing after last completed
+  return sorted[nextIdx].status;                                 // next row's status
+}
+
+/**
  * Rules:
  *   - key status null→'current'       : add gauge_key to current_batches (upsert)
  *   - key status 'current'→'previous' : remove from current_batches, add to previous_batches (if doc exists)
@@ -207,5 +231,6 @@ async function syncBatchCollections(gaugeKey, oldMap, newMap) {
 module.exports = {
   computeBatchKeys,
   computeGaugeDates,
+  computeGaugeStatus,
   syncBatchCollections,
 };

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import SortableHeader from '../../components/SortableHeader'
 import Pagination from '../../components/Pagination'
 import TableSkeleton from '../../components/TableSkeleton'
 import { formatISODate } from '../../utils/dateUtils'
@@ -21,17 +22,56 @@ export function SummaryTableSkeleton({ title }) {
     return <TableSkeleton widths={['w-24', 'w-20', 'w-28', 'w-16', 'w-24', 'w-20', 'w-16', 'w-20', 'w-24', 'w-16', 'w-20']} rows={10} title={title} />
 }
 
-function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [] }) {
+function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [], clearFilterTrigger = 0, onSortChange }) {
     const [currentPage, setCurrentPage] = useState(1)
+    const [sortField, setSortField] = useState(null)
+    const [sortDirection, setSortDirection] = useState('asc')
 
     useEffect(() => {
         setCurrentPage(1)
     }, [rows])
 
+    useEffect(() => {
+        if (clearFilterTrigger > 0) {
+            setSortField(null)
+            setSortDirection('asc')
+            setCurrentPage(1)
+            if (onSortChange) onSortChange(false)
+        }
+    }, [clearFilterTrigger, onSortChange])
+
+    const sortedRows = useMemo(() => {
+        if (!sortField) return rows
+        return [...rows].sort((a, b) => {
+            let aVal = a[sortField]
+            let bVal = b[sortField]
+
+            if (sortField.toLowerCase().includes('date')) {
+                const parseD = (val) => (!val || val === '-' ? 0 : new Date(val).getTime() || 0)
+                aVal = parseD(aVal)
+                bVal = parseD(bVal)
+            }
+
+            if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1
+            if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1
+            return 0
+        })
+    }, [rows, sortField, sortDirection])
+
+    const handleSort = (field) => {
+        if (sortField === field) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+        } else {
+            setSortField(field)
+            setSortDirection('asc')
+        }
+        if (onSortChange) onSortChange(true)
+    }
+
     const itemsPerPage = 10
-    const totalPages = Math.ceil(rows.length / itemsPerPage)
+    const totalPages = Math.ceil(sortedRows.length / itemsPerPage)
     const safePage = Math.max(1, Math.min(currentPage, totalPages || 1))
-    const currentRows = rows.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage)
+    const currentRows = sortedRows.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage)
 
     return (
         <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -42,9 +82,12 @@ function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [] })
                 <thead className="bg-slate-50/60 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                         <th className="whitespace-nowrap px-4 py-3">{firstColumnLabel}</th>
-                        {extraColumns.map((col) => (
-                            <th key={col.header} className="whitespace-nowrap px-4 py-3">{col.header}</th>
-                        ))}
+                        {extraColumns.map((col) => {
+                            if (col.key.toLowerCase().includes('date')) {
+                                return <SortableHeader key={col.header} label={col.header} field={col.key} sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+                            }
+                            return <th key={col.header} className="whitespace-nowrap px-4 py-3">{col.header}</th>
+                        })}
                         <th className="px-4 py-3">No of Vehicles Assigned</th>
                         <th className="px-4 py-3">No of Vehicles attended</th>
                         <th className="px-4 py-3">Pending No</th>

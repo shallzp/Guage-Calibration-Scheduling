@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { PanelRightOpen, X } from 'lucide-react'
 import { apiFetch } from '../../utils/api'
+import { formatDate } from '../../utils/dateUtils'
 import Pagination from '../../components/Pagination'
 import TableSkeleton from '../../components/TableSkeleton'
+import SortableHeader from '../../components/SortableHeader'
 
 // Skeleton — identical structure to real UI, shown while loading
 export function GaugeBatchesSkeleton() {
@@ -10,7 +12,7 @@ export function GaugeBatchesSkeleton() {
     <>
       <div className='my-5'>
         <section className="rounded-3xl border border-white/60 bg-[color:var(--card)] p-5 shadow-sm backdrop-blur">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-4">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="h-3 w-24 rounded-full bg-slate-200/70 animate-pulse" />
               <div className="mt-4 h-6 w-10 rounded-full bg-slate-200/80 animate-pulse" />
@@ -26,12 +28,17 @@ export function GaugeBatchesSkeleton() {
               <div className="mt-4 h-6 w-10 rounded-full bg-slate-200/80 animate-pulse" />
               <div className="mt-2 h-3 w-36 rounded-full bg-slate-200/60 animate-pulse" />
             </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="h-3 w-28 rounded-full bg-slate-200/70 animate-pulse" />
+              <div className="mt-4 h-6 w-10 rounded-full bg-slate-200/80 animate-pulse" />
+              <div className="mt-2 h-3 w-36 rounded-full bg-slate-200/60 animate-pulse" />
+            </div>
           </div>
         </section>
       </div>
 
 
-      <TableSkeleton widths={['w-20', 'w-16', 'w-24', 'w-28', 'w-20', 'w-16', 'w-10']} rows={10} />
+      <TableSkeleton widths={['w-20', 'w-16', 'w-24', 'w-28', 'w-16', 'w-10']} rows={10} />
     </>
   )
 }
@@ -43,7 +50,7 @@ function formatBatchDate(batch) {
   if (batch.date) {
     const d = new Date(batch.date)
     if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      return formatDate(d)
     }
   }
   // Fallback: parse YYYYMMDD suffix from _id (e.g. "BATCH-20221101")
@@ -52,7 +59,7 @@ function formatBatchDate(batch) {
     const s = match[1] // "20221101"
     const d = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`)
     if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      return formatDate(d)
     }
   }
   return '—'
@@ -68,7 +75,7 @@ function RiskScoreBadge({ score }) {
         : ['bg-emerald-100 text-emerald-700 border-emerald-200', 'Low']
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${style}`}>
-      {label} <span className="opacity-60">({v.toFixed(2)})</span>
+      {label} <span className="opacity-60">({Math.round(v * 100)}%)</span>
     </span>
   )
 }
@@ -89,14 +96,7 @@ function RiskCountPills({ riskSummary = {} }) {
   )
 }
 
-function BatchTypeBadge({ type }) {
-  if (!type) return <span className="text-slate-400">—</span>
-  return (
-    <span className="inline-block rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-semibold capitalize text-violet-700">
-      {type}
-    </span>
-  )
-}
+
 
 // Side panel — matches reference image exactly
 function BatchDetailPanel({ batch, onClose }) {
@@ -245,6 +245,9 @@ function GaugeBatches() {
   const [fetchError, setFetchError] = useState('')
   const [selectedBatch, setSelectedBatch] = useState(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [filterRisk, setFilterRisk] = useState('all')
+  const [sortField, setSortField] = useState(null)
+  const [sortDirection, setSortDirection] = useState('asc')
   const PAGE_SIZE = 10
 
   useEffect(() => {
@@ -272,6 +275,58 @@ function GaugeBatches() {
     return () => { isActive = false }
   }, [])
 
+  const filteredBatches = batches.filter(b => {
+    if (filterRisk === 'high') return (b.batch_risk ?? 0) >= 0.7
+    if (filterRisk === 'medium') return (b.batch_risk ?? 0) >= 0.4 && (b.batch_risk ?? 0) < 0.7
+    if (filterRisk === 'low') return (b.batch_risk ?? 0) < 0.4
+    return true
+  })
+
+  const sortedBatches = useMemo(() => {
+    if (!sortField) return filteredBatches
+    return [...filteredBatches].sort((a, b) => {
+      let aVal = a[sortField]
+      let bVal = b[sortField]
+
+      if (sortField === 'batchDate') {
+        const parseD = (batch) => {
+          if (batch.date) {
+            const d = new Date(batch.date)
+            if (!isNaN(d.getTime())) return d.getTime()
+          }
+          const match = String(batch._id || '').match(/(\d{8})$/)
+          if (match) {
+            const s = match[1]
+            const d = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`)
+            if (!isNaN(d.getTime())) return d.getTime()
+          }
+          return 0
+        }
+        aVal = parseD(a)
+        bVal = parseD(b)
+      } else if (sortField === 'batch_risk') {
+        aVal = a.batch_risk ?? 0
+        bVal = b.batch_risk ?? 0
+      } else if (sortField === 'gauge_count') {
+        aVal = a.gauge_count ?? 0
+        bVal = b.gauge_count ?? 0
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [filteredBatches, sortField, sortDirection])
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
   if (isLoading) return <GaugeBatchesSkeleton />
 
   if (fetchError) {
@@ -285,30 +340,53 @@ function GaugeBatches() {
     )
   }
 
-  const totalPages = Math.max(1, Math.ceil(batches.length / PAGE_SIZE))
+
+
+  const totalPages = Math.max(1, Math.ceil(sortedBatches.length / PAGE_SIZE))
   const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages)
-  const paginatedBatches = batches.slice((safeCurrentPage - 1) * PAGE_SIZE, safeCurrentPage * PAGE_SIZE)
+  const paginatedBatches = sortedBatches.slice((safeCurrentPage - 1) * PAGE_SIZE, safeCurrentPage * PAGE_SIZE)
+
+  const highRiskCount = batches.filter(b => (b.batch_risk ?? 0) >= 0.7).length
+  const mediumRiskCount = batches.filter(b => (b.batch_risk ?? 0) >= 0.4 && (b.batch_risk ?? 0) < 0.7).length
+  const lowRiskCount = batches.filter(b => (b.batch_risk ?? 0) < 0.4).length
 
   return (
     <>
       <div className='my-5'>
         <section className="rounded-3xl border border-white/60 bg-[color:var(--card)] p-5 shadow-sm backdrop-blur">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <button 
+              onClick={() => { setFilterRisk('all'); setCurrentPage(1); }}
+              className={`text-left rounded-2xl border border-slate-200 bg-slate-50 p-4 transition-all hover:shadow-md ${filterRisk === 'all' ? 'ring-2 ring-slate-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
+            >
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Total Batches</p>
               <p className="mt-4 text-3xl font-bold text-slate-900">{batches.length}</p>
               <p className="mt-1 text-xs text-slate-500">Current open batches</p>
-            </div>
-            <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-700">Problematic Batches</p>
-              <p className="mt-4 text-3xl font-bold text-rose-700">0</p>
-              <p className="mt-1 text-xs text-rose-600">Need intervention and monitoring</p>
-            </div>
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Healthy Batches</p>
-              <p className="mt-4 text-3xl font-bold text-emerald-700">0</p>
-              <p className="mt-1 text-xs text-emerald-600">No current action required</p>
-            </div>
+            </button>
+            <button 
+              onClick={() => { setFilterRisk('high'); setCurrentPage(1); }}
+              className={`text-left rounded-2xl border border-rose-200 bg-rose-50/70 p-4 transition-all hover:shadow-md ${filterRisk === 'high' ? 'ring-2 ring-rose-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-700">High Risk Batches</p>
+              <p className="mt-4 text-3xl font-bold text-rose-700">{highRiskCount}</p>
+              <p className="mt-1 text-xs text-rose-600">Risk score ≥ 70%</p>
+            </button>
+            <button 
+              onClick={() => { setFilterRisk('medium'); setCurrentPage(1); }}
+              className={`text-left rounded-2xl border border-amber-200 bg-amber-50/70 p-4 transition-all hover:shadow-md ${filterRisk === 'medium' ? 'ring-2 ring-amber-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Medium Risk Batches</p>
+              <p className="mt-4 text-3xl font-bold text-amber-700">{mediumRiskCount}</p>
+              <p className="mt-1 text-xs text-amber-600">Risk score 40% - 69%</p>
+            </button>
+            <button 
+              onClick={() => { setFilterRisk('low'); setCurrentPage(1); }}
+              className={`text-left rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 transition-all hover:shadow-md ${filterRisk === 'low' ? 'ring-2 ring-emerald-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Low Risk Batches</p>
+              <p className="mt-4 text-3xl font-bold text-emerald-700">{lowRiskCount}</p>
+              <p className="mt-1 text-xs text-emerald-600">Risk score &lt; 40%</p>
+            </button>
           </div>
         </section>
       </div>
@@ -320,11 +398,11 @@ function GaugeBatches() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3">Batch Date</th>
-                <th className="px-4 py-3">Batch Size</th>
+                <SortableHeader label="Batch Date" field="batchDate" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+                <SortableHeader label="Batch Size" field="gauge_count" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                 <th className="px-4 py-3">Risk Counts</th>
-                <th className="px-4 py-3">Batch Risk</th>
-                <th className="px-4 py-3">Batch Type</th>
+                <SortableHeader label="Batch Risk" field="batch_risk" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+
                 <th className="px-4 py-3 text-center">Details</th>
               </tr>
             </thead>
@@ -335,7 +413,7 @@ function GaugeBatches() {
                   <td className="px-4 py-3">{batch.gauge_count ?? 0}</td>
                   <td className="px-4 py-3"><RiskCountPills riskSummary={batch.risk_summary} /></td>
                   <td className="px-4 py-3"><RiskScoreBadge score={batch.batch_risk} /></td>
-                  <td className="px-4 py-3"><BatchTypeBadge type={batch.batch_type} /></td>
+
                   <td className="px-4 py-3 text-center">
                     <button
                       type="button"
@@ -357,7 +435,7 @@ function GaugeBatches() {
       <Pagination
         currentPage={safeCurrentPage}
         totalPages={totalPages}
-        filteredCount={batches.length}
+        filteredCount={filteredBatches.length}
         onPageChange={(page) => setCurrentPage(page)}
       />
 

@@ -7,7 +7,7 @@ import StakeholderModal from '../features/gauge/StakeholderModal'
 
 import { addMonthsClamped, formatDate, inputDateToDisplayDate, parseDate, toInputDate } from '../utils/dateUtils'
 import { getStakeholders, saveStakeholders } from '../utils/stakeholderData'
-import { STATUS, appendNextScheduleDate, applyOverdueRule, getCurrentDueDate, getLastCompletionDateFromSchedule, } from '../utils/gaugeData'
+import { STATUS, appendNextScheduleDate, applyOverdueRule, getCurrentDueDate, getLastCompletionDateFromSchedule, toGaugeModelFromApi } from '../utils/gaugeData'
 import { apiFetch } from '../utils/api'
 
 const initialDialogState = {
@@ -248,8 +248,12 @@ function ScheduleCalibration({ gauges, setGauges }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ frequency: nextFrequency }),
     })
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) console.error('Update frequency failed:', res.status, res.statusText)
+        else {
+          const updatedRecord = await res.json()
+          setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
+        }
       })
       .catch((err) => console.error('Update frequency network error:', err))
 
@@ -264,8 +268,12 @@ function ScheduleCalibration({ gauges, setGauges }) {
           body: JSON.stringify({ due_date: dueDate }),
         },
       )
-        .then((res) => {
+        .then(async (res) => {
           if (!res.ok) console.error(`Freq shift failed for schedule ${scheduleId}:`, res.status)
+          else {
+            const updatedRecord = await res.json()
+            setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
+          }
         })
         .catch((err) => console.error(`Freq shift error for schedule ${scheduleId}:`, err))
     }
@@ -294,8 +302,12 @@ function ScheduleCalibration({ gauges, setGauges }) {
     apiFetch(`/api/gauges/${encodeURIComponent(selectedGauge.key)}/schedule`, {
       method: 'POST',
     })
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) console.error('Add schedule failed:', res.status, res.statusText)
+        else {
+          const updatedRecord = await res.json()
+          setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
+        }
       })
       .catch((err) => console.error('Add schedule network error:', err))
   }
@@ -368,8 +380,12 @@ function ScheduleCalibration({ gauges, setGauges }) {
           body: JSON.stringify({ due_date: dueDate }),
         },
       )
-        .then((res) => {
+        .then(async (res) => {
           if (!res.ok) console.error(`Update due date failed for schedule ${scheduleId}:`, res.status)
+          else {
+            const updatedRecord = await res.json()
+            setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
+          }
         })
         .catch((err) => console.error(`Update due date error for schedule ${scheduleId}:`, err))
     }
@@ -447,8 +463,12 @@ function ScheduleCalibration({ gauges, setGauges }) {
           }),
         },
       )
-        .then((res) => {
+        .then(async (res) => {
           if (!res.ok) console.error('Update status failed:', res.status, res.statusText)
+          else {
+            const updatedRecord = await res.json()
+            setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
+          }
         })
         .catch((err) => console.error('Update status network error:', err))
     }
@@ -505,8 +525,12 @@ function ScheduleCalibration({ gauges, setGauges }) {
           body: JSON.stringify({ due_date: dueDate }),
         },
       )
-        .then((res) => {
+        .then(async (res) => {
           if (!res.ok) console.error(`Shift date failed for schedule ${scheduleId}:`, res.status)
+          else {
+            const updatedRecord = await res.json()
+            setGauges((prev) => prev.map((g) => (g.key === gaugeKey ? toGaugeModelFromApi(updatedRecord) : g)))
+          }
         })
         .catch((err) => console.error(`Shift date error for schedule ${scheduleId}:`, err))
     }

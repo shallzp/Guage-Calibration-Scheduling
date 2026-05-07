@@ -16,7 +16,7 @@ router.get('/current', async (req, res) => {
   try {
     const docs = await getCollection('current_batches')
       .find({}, {
-        projection: { _id: 1, date: 1, gauge_count: 1, batch_risk: 1, batch_type: 1, risk_summary: 1, gauge_keys: 1 },
+        projection: { _id: 1, date: 1, gauge_count: 1, batch_risk: 1, risk_summary: 1, gauge_keys: 1 },
       })
       .toArray();
 

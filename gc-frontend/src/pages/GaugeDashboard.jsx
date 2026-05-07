@@ -10,13 +10,14 @@ import DialogBox from '../components/DialogBox'
 import SLAConfigModal from '../features/gauge/SLAConfigModal'
 
 import { applySLAConfigToGauges, processSLAEmails } from '../utils/slaUtils'
-import { STATUS } from '../utils/gaugeData'
 import { apiFetch } from '../utils/api'
 
 const DEFAULT_FILTERS = {
   query: '',
   location: 'all',
   frequency: 'all',
+  currentStatus: 'all',
+  riskLevel: 'all',
 }
 
 const TAB_CONFIG = [
@@ -111,6 +112,8 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
     return {
       location: toSelectOptions(getUniqueValues('currentLocation'), 'All Locations'),
       frequency: toSelectOptions(frequencyVals, 'All Frequencies'),
+      currentStatus: toSelectOptions(getUniqueValues('currentStatus'), 'All Statuses'),
+      riskLevel: toSelectOptions(getUniqueValues('riskLevel'), 'All Risk Levels'),
     }
   }, [gaugesWithSla])
 
@@ -120,6 +123,8 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
     return gaugesWithSla.filter((gauge) => {
       if (filters.location !== 'all' && gauge.currentLocation !== filters.location) return false
       if (filters.frequency !== 'all' && String(gauge.frequency) !== filters.frequency) return false
+      if (filters.currentStatus !== 'all' && gauge.currentStatus !== filters.currentStatus) return false
+      if (filters.riskLevel !== 'all' && gauge.riskLevel !== filters.riskLevel) return false
       if (!query) return true
 
       const searchable = [
@@ -139,7 +144,9 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
   const isFilterActive =
     filters.query.trim() !== '' ||
     filters.location !== DEFAULT_FILTERS.location ||
-    filters.frequency !== DEFAULT_FILTERS.frequency
+    filters.frequency !== DEFAULT_FILTERS.frequency ||
+    filters.currentStatus !== DEFAULT_FILTERS.currentStatus ||
+    filters.riskLevel !== DEFAULT_FILTERS.riskLevel
 
   const handleOpenSchedule = (gaugeKey) => {
     navigate(`/gauge-calibration/schedule/${encodeURIComponent(gaugeKey)}`)

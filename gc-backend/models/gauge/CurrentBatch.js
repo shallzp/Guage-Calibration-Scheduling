@@ -12,7 +12,6 @@ const CurrentBatchSchema = new mongoose.Schema(
       low: { type: Number, default: 0 },
     },
     batch_risk: { type: Number, default: 0 },
-    batch_type: { type: String, default: null },
     generated_at: { type: Date, default: Date.now },
   },
   { versionKey: false, collection: 'current_batches' },

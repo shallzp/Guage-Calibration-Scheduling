@@ -45,6 +45,15 @@ const GaugeSchema = new mongoose.Schema(
     schedule_table: { type: [ScheduleRowSchema], default: [] },
     ml_features: {
       // can be removed or anything more can be added
+      days_until_due: Number,
+      overdue_count: Number,
+      completion_rate: Number,
+      avg_delay_days: Number,
+      frequency_months: Number,
+      is_overdue: Number,
+      next_due_date: { type: Date, default: null },
+      max_delay_days: Number,
+      history_size: Number,
     },
     latest_prediction: {
       // can be removed or anything more can be added

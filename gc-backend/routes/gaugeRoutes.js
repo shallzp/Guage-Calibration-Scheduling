@@ -5,7 +5,7 @@ const { sanitizeGaugePatch, normalizeScheduleStatus, parseDateValue } = require(
 
 const { normalizeStakeholdersPayload, hydrateStakeholders } = require('../utils/stakeholderUtils');
 const { computeRiskSummary } = require('../utils/riskUtils');
-const { computeBatchKeys, computeGaugeDates, syncBatchCollections } = require('../utils/batchUtils');
+const { computeBatchKeys, computeGaugeDates, computeGaugeStatus, syncBatchCollections } = require('../utils/batchUtils');
 
 const router = express.Router();
 
@@ -128,23 +128,25 @@ router.patch('/:gaugeKey', async (req, res) => {
       { returnDocument: 'after', runValidators: true },
     ).lean();
 
-    // If schedule_table was updated, recompute batch_keys, gaugeDates and sync
+    // If schedule_table was updated, recompute batch_keys, gaugeDates, status and sync
     if (patch.schedule_table) {
       const batchKeys = computeBatchKeys(updatedGauge.schedule_table);
       const gaugeDates = computeGaugeDates(updatedGauge.schedule_table);
-      
+      const gaugeStatus = computeGaugeStatus(updatedGauge.schedule_table);
+
       updatedGauge = await Gauge.findOneAndUpdate(
         { gauge_key: gaugeKey },
         {
           $set: {
             batch_keys: batchKeys,
             due_date: gaugeDates.due_date,
-            last_completion_date: gaugeDates.last_completion_date
+            last_completion_date: gaugeDates.last_completion_date,
+            status: gaugeStatus,
           }
         },
         { returnDocument: 'after' },
       ).lean();
-      
+
       syncBatchCollections(gaugeKey, existingGauge.batch_keys, batchKeys).catch((err) =>
         console.error('syncBatchCollections (PATCH gauge) error:', err),
       );
@@ -207,16 +209,18 @@ router.post('/:gaugeKey/schedule', async (req, res) => {
       { returnDocument: 'after', runValidators: true },
     ).lean();
 
-    // Recompute batch_keys and root dates from the full updated schedule
+    // Recompute batch_keys, root dates and status from the full updated schedule
     const batchKeys = computeBatchKeys(afterPush.schedule_table);
     const gaugeDates = computeGaugeDates(afterPush.schedule_table);
+    const gaugeStatus = computeGaugeStatus(afterPush.schedule_table);
     const updated = await Gauge.findOneAndUpdate(
       { gauge_key: gaugeKey },
       {
         $set: {
           batch_keys: batchKeys,
           due_date: gaugeDates.due_date,
-          last_completion_date: gaugeDates.last_completion_date
+          last_completion_date: gaugeDates.last_completion_date,
+          status: gaugeStatus,
         }
       },
       { returnDocument: 'after' },
@@ -227,7 +231,17 @@ router.post('/:gaugeKey/schedule', async (req, res) => {
       console.error('syncBatchCollections (POST schedule) error:', err),
     );
 
-    return res.status(201).json(updated);
+    // Trigger fast ML recalculation for the specific gauge (includes batch risk updates)
+    try {
+      await fetch(`http://127.0.0.1:8000/api/risk/gauge/${encodeURIComponent(gaugeKey)}/run`, {
+        method: 'POST',
+      });
+    } catch (err) {
+      console.error(`Failed to trigger ML risk recalculation for ${gaugeKey}:`, err);
+    }
+
+    const finalGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    return res.status(201).json(finalGauge);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -289,16 +303,18 @@ router.patch('/:gaugeKey/schedule/:scheduleId', async (req, res) => {
       return res.status(404).json({ message: 'Gauge not found.' });
     }
 
-    // Recompute the full batch_keys map and root dates from the updated schedule
+    // Recompute the full batch_keys map, root dates and status from the updated schedule
     const batchKeys = computeBatchKeys(afterUpdate.schedule_table);
     const gaugeDates = computeGaugeDates(afterUpdate.schedule_table);
+    const gaugeStatus = computeGaugeStatus(afterUpdate.schedule_table);
     const updated = await Gauge.findOneAndUpdate(
       { gauge_key: gaugeKey },
       {
         $set: {
           batch_keys: batchKeys,
           due_date: gaugeDates.due_date,
-          last_completion_date: gaugeDates.last_completion_date
+          last_completion_date: gaugeDates.last_completion_date,
+          status: gaugeStatus,
         }
       },
       { returnDocument: 'after' },
@@ -309,7 +325,17 @@ router.patch('/:gaugeKey/schedule/:scheduleId', async (req, res) => {
       console.error('syncBatchCollections (PATCH schedule) error:', err),
     );
 
-    return res.json(updated);
+    // Trigger fast ML recalculation for the specific gauge (includes batch risk updates)
+    try {
+      await fetch(`http://127.0.0.1:8000/api/risk/gauge/${encodeURIComponent(gaugeKey)}/run`, {
+        method: 'POST',
+      });
+    } catch (err) {
+      console.error(`Failed to trigger ML risk recalculation for ${gaugeKey}:`, err);
+    }
+
+    const finalGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    return res.json(finalGauge);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

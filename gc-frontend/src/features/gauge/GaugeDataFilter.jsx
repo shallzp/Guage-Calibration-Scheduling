@@ -1,9 +1,11 @@
 import FilterSelect from '../../components/FilterSelect'
-import { Search, MapPin, Timer } from 'lucide-react'
+import { Search, MapPin, Timer, Activity, AlertTriangle } from 'lucide-react'
 
 const FILTER_FIELDS = [
   { key: 'location', ariaLabel: 'Filter by location', icon  : MapPin },
   { key: 'frequency', ariaLabel: 'Filter by frequency', icon: Timer },
+  { key: 'currentStatus', ariaLabel: 'Filter by current status', icon: Activity },
+  { key: 'riskLevel', ariaLabel: 'Filter by risk level', icon: AlertTriangle },
 ]
 
 
@@ -14,8 +16,8 @@ export function GaugeFiltersSkeleton() {
         <div className="h-4 w-24 rounded-full bg-slate-200/70 animate-pulse" />
         <div className="h-9 w-28 rounded-lg bg-slate-200/60 animate-pulse" />
       </div>
-      <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-3 xl:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, index) => (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
           <div key={`filter-skeleton-${index}`} className="h-11 rounded-xl bg-slate-200/70 animate-pulse" />
         ))}
       </div>
@@ -38,8 +40,8 @@ function GaugeDataFilter({ filters, onFilterChange, onClearFilters, isFilterActi
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-3 xl:grid-cols-3">
-        <div className="relative">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
+        <div className="relative sm:col-span-2 lg:col-span-4 xl:col-span-4">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden="true" />
           <input
             type="text"

@@ -5,6 +5,7 @@ const PreviousBatchSnapshotSchema = new mongoose.Schema(
     gauge_key: { type: String, required: true, trim: true },
     risk_score: Number,
     risk_level: String,
+    days_until_due: { type: Number, default: 0 },
     days_overdue: Number,
     completion_status: String,
     delay_days: Number,

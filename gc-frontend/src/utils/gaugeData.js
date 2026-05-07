@@ -168,6 +168,7 @@ export function toGaugeModelFromApi(record) {
     frequency: Number(record?.frequency) || 0,
     dueDate: dueDate || getCurrentDueDate(schedule, record?.due_date ? dueDate : '-'),
     lastCompletionDate: lastCompletion || getLastCompletionDateFromSchedule(schedule, '-'),
+    currentStatus: normalizeApiStatus(record?.status),
     riskLevel: String(record?.latest_prediction?.risk_level || '').trim().toLowerCase(),
     riskScore: record?.latest_prediction?.risk_score ?? null,
     riskAction: String(record?.latest_prediction?.action || '').trim(),

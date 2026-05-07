@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { NavLink, useParams } from 'react-router-dom'
 
 import { normalizeCampaignRow, toSelectOptions, buildCampaignOverviewRows, buildSummaryRows } from '../utils/campaignData'
@@ -47,6 +47,12 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
     : TAB_CONFIG[0].id
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
+  const [clearFilterTrigger, setClearFilterTrigger] = useState(0)
+  const [isTableSorted, setIsTableSorted] = useState(false)
+
+  useEffect(() => {
+    setIsTableSorted(false)
+  }, [tab])
 
   const normalizedCampaignRows = useMemo(() => campaignData.map(normalizeCampaignRow), [campaignData])
 
@@ -109,8 +115,8 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
   )
 
   const isFilterActive = useMemo(
-    () => Object.values(filters).some((value) => value !== 'all'),
-    [filters],
+    () => Object.values(filters).some((value) => value !== 'all') || isTableSorted,
+    [filters, isTableSorted],
   )
 
   const showFilters = FILTERED_DASHBOARDS.has(selectedDashboard)
@@ -121,6 +127,7 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
 
   const handleClearFilters = () => {
     setFilters(DEFAULT_FILTERS)
+    setClearFilterTrigger((prev) => prev + 1)
   }
 
   return (
@@ -187,7 +194,7 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
           {(isLoading || hasError) && selectedDashboard === 'parts-dispatch-summary' && <PartsDispatchSkeleton />}
 
           {!isLoading && !hasError && selectedDashboard === 'campaign-overview' && (
-            <CampaignOverview campaignOverviewRows={campaignOverviewRows} />
+            <CampaignOverview campaignOverviewRows={campaignOverviewRows} clearFilterTrigger={clearFilterTrigger} onSortChange={setIsTableSorted} />
           )}
 
           {!isLoading && !hasError && selectedDashboard === 'region-wise-summary' && (
@@ -195,6 +202,8 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
               title="Region-wise Campaign Summary"
               rows={regionSummaryRows}
               firstColumnLabel="Region"
+              clearFilterTrigger={clearFilterTrigger}
+              onSortChange={setIsTableSorted}
             />
           )}
 
@@ -203,11 +212,13 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
               title="Area-office Wise Campaign Summary"
               rows={areaOfficeSummary}
               firstColumnLabel="Area Office"
+              clearFilterTrigger={clearFilterTrigger}
+              onSortChange={setIsTableSorted}
             />
           )}
 
           {!isLoading && !hasError && selectedDashboard === 'parts-dispatch-summary' && (
-            <PartsDispatchDetails dispatchData={partsDispatchData} />
+            <PartsDispatchDetails dispatchData={partsDispatchData} clearFilterTrigger={clearFilterTrigger} onSortChange={setIsTableSorted} />
           )}
         </div>
       </section>

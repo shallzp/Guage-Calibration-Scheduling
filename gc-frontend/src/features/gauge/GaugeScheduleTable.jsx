@@ -1,4 +1,6 @@
+import { useState, useMemo } from 'react'
 import { Pencil } from 'lucide-react'
+import SortableHeader from '../../components/SortableHeader'
 
 import StatusUpdater from '../../components/StatusUpdater'
 import { calculateReminderDate, calculateEscalationDate } from '../../utils/slaUtils'
@@ -6,6 +8,49 @@ import { calculateReminderDate, calculateEscalationDate } from '../../utils/slaU
 const statusOptions = ['In Progress', 'Not Started', 'Completed', 'Overdue']
 
 function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeFrequency, onEditDueDate }) {
+  const [sortField, setSortField] = useState(null)
+  const [sortDirection, setSortDirection] = useState('asc')
+
+  const sortedSchedule = useMemo(() => {
+    const enhanced = gauge?.schedule?.map((row, i) => ({
+      ...row,
+      originalIndex: i,
+      calcReminder: row.reminderDateTime || calculateReminderDate(row.dueDate, row.status, slaConfig),
+      calcEscalation: row.escalationDateTime || calculateEscalationDate(row.dueDate, row.status, slaConfig),
+    })) || []
+
+    if (!sortField) return enhanced
+
+    return enhanced.sort((a, b) => {
+      let aVal = a[sortField]
+      let bVal = b[sortField]
+
+      if (['dueDate', 'completionDate', 'calcReminder', 'calcEscalation'].includes(sortField)) {
+        const parseD = (val) => {
+          if (!val || val === '-' || val === 'Not Available') return 0
+          // remove " - " if it's in the reminder string format like "01 Jan 2026 - 10:00 AM"
+          const cleanVal = val.includes(' - ') ? val.split(' - ')[0] : val
+          return new Date(cleanVal).getTime() || 0
+        }
+        aVal = parseD(aVal)
+        bVal = parseD(bVal)
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [gauge?.schedule, slaConfig, sortField, sortDirection])
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
   if (!gauge) return null
 
   return (
@@ -67,15 +112,17 @@ function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeF
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">Date</th>
+              <SortableHeader label="Date" field="dueDate" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
               <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Completion Date</th>
-              <th className="px-4 py-3">Reminder Email Date & Time</th>
-              <th className="px-4 py-3">Escalate Email Date & Time</th>
+              <SortableHeader label="Completion Date" field="completionDate" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Reminder Email Date & Time" field="calcReminder" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Escalate Email Date & Time" field="calcEscalation" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
             </tr>
           </thead>
           <tbody>
-            {gauge.schedule.map((row, index) => (
+            {sortedSchedule.map((row) => {
+              const index = row.originalIndex
+              return (
               <tr key={row.id} className="group border-t border-slate-200/80 text-slate-700">
                 <td className="px-4 py-3 font-medium">
                   <div className="flex items-center gap-2">
@@ -99,13 +146,14 @@ function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeF
                   onStatusChange={(nextStatus) => onStatusChange(index, nextStatus)}
                 />
                 <td className="px-4 py-3">
-                  {row.reminderDateTime || calculateReminderDate(row.dueDate, row.status, slaConfig)}
+                  {row.calcReminder}
                 </td>
                 <td className="px-4 py-3">
-                  {row.escalationDateTime || calculateEscalationDate(row.dueDate, row.status, slaConfig)}
+                  {row.calcEscalation}
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
