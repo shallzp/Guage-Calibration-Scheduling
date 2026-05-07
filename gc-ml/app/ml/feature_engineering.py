@@ -2,20 +2,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from math import sqrt
 from typing import Any
 
 from app.core.date_utils import parse_date
+
+# Temporal decay half-life in days.
+# A failure that occurred DECAY_HALF_LIFE_DAYS ago is weighted 50% of a failure today.
+DECAY_HALF_LIFE_DAYS: float = 365.0
 
 
 @dataclass(frozen=True)
 class GaugeRiskFeatures:
     days_until_due: int
     overdue_count: int
+    # Exponentially-decayed overdue score — recent failures count more.
+    decayed_overdue_score: float
     completion_rate: float
     avg_delay_days: float
     frequency_months: int
     is_overdue: int
     next_due_date: datetime | None
+    # Total number of historical records (completed + overdue).  Used to
+    # compute the confidence-interval margin of error in scorer.py.
+    history_size: int
 
 
 def _normalized_status(value: Any) -> str:
@@ -31,6 +41,7 @@ def extract_risk_features(gauge: dict[str, Any], *, today: datetime | None = Non
     total_entries = 0
     completed_entries = 0
     overdue_count = 0
+    decayed_overdue_score: float = 0.0
     delay_days: list[int] = []
     next_schedule: dict[str, Any] | None = None
 
@@ -46,11 +57,23 @@ def extract_risk_features(gauge: dict[str, Any], *, today: datetime | None = Non
             completion_date = parse_date(row.get("completion_date"))
             if due_date and completion_date:
                 delay_days.append((completion_date - due_date).days)
+
         elif status == "overdue":
             overdue_count += 1
+            # Apply exponential temporal decay based on how long ago this
+            # schedule row was due.  More-recent failures carry more weight.
+            due_date = parse_date(row.get("due_date"))
+            if due_date is not None:
+                days_ago = max(0.0, (today - due_date).total_seconds() / 86_400)
+            else:
+                days_ago = 0.0
+            decayed_overdue_score += (0.5 ** (days_ago / DECAY_HALF_LIFE_DAYS))
 
         if next_schedule is None and status in {"not-started", "in-progress", "overdue"}:
             next_schedule = row
+
+    # history_size = entries that actually carry useful signal (completed or overdue)
+    history_size = completed_entries + overdue_count
 
     completion_rate = completed_entries / total_entries if total_entries > 0 else 0.0
 
@@ -75,9 +98,12 @@ def extract_risk_features(gauge: dict[str, Any], *, today: datetime | None = Non
     return GaugeRiskFeatures(
         days_until_due=days_until_due,
         overdue_count=overdue_count,
+        decayed_overdue_score=decayed_overdue_score,
         completion_rate=completion_rate,
         avg_delay_days=avg_delay,
         frequency_months=frequency_months,
         is_overdue=is_overdue,
         next_due_date=next_due_date,
+        history_size=history_size,
     )
+

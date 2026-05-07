@@ -33,14 +33,20 @@ def build_risk_payload(gauge: dict[str, Any], *, today: datetime | None = None) 
         "days_since_last_completion": days_since_last_completion,
         "frequency_gap_days": frequency_gap_days,
         "historical_failure_count": features.overdue_count,
+        "decayed_overdue_score": features.decayed_overdue_score,
         "historical_success_rate": features.completion_rate,
         "avg_delay_days": features.avg_delay_days,
+        "history_size": features.history_size,
         "computed_at": today,
     }
 
     latest_prediction = {
         "risk_score": result.risk_score,
         "risk_level": result.risk_level,
+        "scored_with": result.scored_with,
+        "margin_of_error": result.margin_of_error,
+        "confidence_lower": result.confidence_lower,
+        "confidence_upper": result.confidence_upper,
         "action": None,
         "reason": None,
         "signals": [],

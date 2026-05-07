@@ -143,3 +143,23 @@ def add_latest_prediction(gauge_key: str, latest_prediction: dict[str, Any]) -> 
         },
     )
     return result.matched_count > 0
+def save_recommendation(gauge_key: str, recommendation: dict[str, Any]) -> bool:
+    """Persist the latest recommendation payload onto the gauge document."""
+    if not gauge_key or not isinstance(recommendation, dict):
+        return False
+
+    payload = dict(recommendation)
+    payload.setdefault("generated_at", utc_timestamp())
+
+    result = get_db()["gauges"].update_one(
+        gauge_lookup_filter(gauge_key),
+        {
+            "$set": sanitize_for_mongo(
+                {
+                    "latest_recommendation": payload,
+                    "updated_at": utc_timestamp(),
+                }
+            )
+        },
+    )
+    return result.matched_count > 0

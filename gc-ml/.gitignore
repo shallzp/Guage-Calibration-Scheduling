@@ -4,6 +4,3 @@
 **/__pycache__/*  
 
 /venv/*
-
-/app/ml/recommender.py
-/app/ml/trainer.py

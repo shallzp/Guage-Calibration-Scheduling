@@ -1,0 +1,8 @@
+{
+  "high_risk_threshold": 0.9632,
+  "medium_risk_threshold": 0.9535,
+  "trained_at": "2026-05-07T04:27:33.975497",
+  "threshold_method": "precision_recall_curve",
+  "high_precision_target": 0.8,
+  "medium_recall_target": 0.8
+}

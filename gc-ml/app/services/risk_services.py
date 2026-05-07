@@ -11,9 +11,11 @@ from app.db.repositories.gauge import (
 from app.db.repositories.current_batches import update_current_batch_risk
 from app.db.repositories.previous_batches import update_previous_batch_risk
 from app.ml.classifier import build_risk_payload
+from app.ml.active_delay_tracker import refresh_active_delays
 
 
 def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, Any]:
+    today = datetime.utcnow()
     gauges = load_gauge_records_from_db()
     updated = 0
     errors: list[str] = []
@@ -24,7 +26,7 @@ def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, An
             continue
 
         try:
-            payload = build_risk_payload(gauge, today=datetime.utcnow())
+            payload = build_risk_payload(gauge, today=today)
             if not add_ml_features(gauge_key, payload["ml_features"]):
                 errors.append(f"ml_features:{gauge_key}")
                 continue
@@ -34,6 +36,9 @@ def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, An
             updated += 1
         except (ValueError, TypeError) as exc:
             errors.append(f"{gauge_key}:{exc}")
+
+    # Refresh live active-delay snapshots for every gauge with an open schedule
+    active_delay_refreshed = refresh_active_delays(gauges, today=today)
 
     current_risk_updated = 0
     previous_risk_updated = 0
@@ -46,6 +51,7 @@ def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, An
         "updated": updated,
         "total": len(gauges),
         "errors": errors,
+        "active_delay_refreshed": active_delay_refreshed,
         "current_risk_updated": current_risk_updated,
         "previous_risk_updated": previous_risk_updated,
     }
