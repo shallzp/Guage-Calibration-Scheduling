@@ -3,14 +3,30 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from app.db.repositories.gauge import (
-    add_latest_prediction,
-    add_ml_features,
-    load_gauge_records_from_db,
-)
+from app.db.repositories.gauge import ( add_latest_prediction, add_ml_features, load_gauge_records_from_db )
 from app.db.repositories.current_batches import update_current_batch_risk
 from app.db.repositories.previous_batches import update_previous_batch_risk
+from app.db.repositories.batches import update_unified_batch_risk
+from app.db.mongo_client import get_db
 from app.ml.classifier import build_risk_payload
+
+def update_single_gauge_prediction(gauge_key: str, *, update_batches: bool = True) -> dict[str, Any]:
+    today = datetime.utcnow()
+    db = get_db()
+    gauge = db["gauges"].find_one({"gauge_key": gauge_key}, {"_id": 0})
+    if not gauge:
+        raise ValueError(f"Gauge {gauge_key} not found")
+
+    payload = build_risk_payload(gauge, today=today)
+    add_ml_features(gauge_key, payload["ml_features"])
+    add_latest_prediction(gauge_key, payload["latest_prediction"])
+
+    if update_batches:
+        update_current_batch_risk()
+        update_previous_batch_risk()
+        update_unified_batch_risk()
+
+    return {"gauge_key": gauge_key, "updated": True}
 
 
 def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, Any]:
@@ -37,10 +53,12 @@ def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, An
 
     current_risk_updated = 0
     previous_risk_updated = 0
+    unified_risk_updated = 0
     if update_batches:
         # Only update risk data on existing batch documents — do not rebuild structure
         current_risk_updated = update_current_batch_risk()
         previous_risk_updated = update_previous_batch_risk()
+        unified_risk_updated = update_unified_batch_risk()
 
     return {
         "updated": updated,
@@ -48,4 +66,5 @@ def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, An
         "errors": errors,
         "current_risk_updated": current_risk_updated,
         "previous_risk_updated": previous_risk_updated,
+        "unified_risk_updated": unified_risk_updated,
     }

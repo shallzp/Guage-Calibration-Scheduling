@@ -4,3 +4,5 @@
 **/__pycache__/*  
 
 model/*
+
+risk_pipeline_analysis.md

@@ -1,13 +1,58 @@
 from __future__ import annotations
 
+import os
+import joblib
+import pandas as pd
 from dataclasses import dataclass
-from math import log1p
 
 from app.ml.feature_engineering import GaugeRiskFeatures, extract_risk_features
+from app.core.config import HIGH_RISK_CUTOFF, MEDIUM_RISK_CUTOFF, MODEL_PATH, FEATURES_PATH, METADATA_PATH
 
-# import from app.core.config
-from app.core.config import HIGH_RISK_CUTOFF, MEDIUM_RISK_CUTOFF
+# ---------------------------------------------------------------------------
+# Global Model State (Lazy Loading)
+# ---------------------------------------------------------------------------
+_model = None
+_scaler = None
+_feature_cols = None
+_high_cutoff = HIGH_RISK_CUTOFF
+_medium_cutoff = MEDIUM_RISK_CUTOFF
 
+# Scaler lives next to the model
+_SCALER_PATH = os.path.join(os.path.dirname(MODEL_PATH), "scaler.pkl")
+
+
+def _load_model() -> None:
+    global _model, _scaler, _feature_cols, _high_cutoff, _medium_cutoff
+
+    if _model is not None:
+        return  # already loaded
+
+    if not os.path.exists(MODEL_PATH) or not os.path.exists(FEATURES_PATH):
+        raise FileNotFoundError(
+            f"Model or features not found at {MODEL_PATH}. Run trainer.py first."
+        )
+
+    _model = joblib.load(MODEL_PATH)
+    _feature_cols = joblib.load(FEATURES_PATH)
+
+    # Load scaler (required — model was trained on scaled data)
+    if os.path.exists(_SCALER_PATH):
+        _scaler = joblib.load(_SCALER_PATH)
+    else:
+        raise FileNotFoundError(
+            f"Scaler not found at {_SCALER_PATH}. Re-run trainer.py to regenerate."
+        )
+
+    # Load auto-calibrated thresholds
+    if os.path.exists(METADATA_PATH):
+        meta = joblib.load(METADATA_PATH)
+        _high_cutoff = meta.get("HIGH_RISK_CUTOFF", HIGH_RISK_CUTOFF)
+        _medium_cutoff = meta.get("MEDIUM_RISK_CUTOFF", MEDIUM_RISK_CUTOFF)
+
+
+# ---------------------------------------------------------------------------
+# Result dataclass
+# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class RiskScoreResult:
@@ -16,31 +61,62 @@ class RiskScoreResult:
     features: GaugeRiskFeatures
 
 
+# ---------------------------------------------------------------------------
+# Core scoring functions
+# ---------------------------------------------------------------------------
+
 def compute_risk_score(features: GaugeRiskFeatures) -> float:
-    overdue_days = max(0, -features.days_until_due)
-    d_score = log1p(overdue_days)
+    """
+    Returns a 0–100 risk score derived from P(HIGH) output of the
+    Logistic Regression model.
+    """
+    try:
+        _load_model()
+    except FileNotFoundError:
+        return 0.0
 
-    completion_penalty = 1.0 - max(0.0, min(1.0, features.completion_rate))
+    if _model is None or _feature_cols is None or _scaler is None:
+        return 0.0
 
-    frequency_term = 0.0
-    if features.frequency_months > 0:
-        frequency_term = 1.0 / features.frequency_months
+    x_dict = {
+        "days_until_due":    features.days_until_due,
+        "overdue_count":     features.overdue_count,
+        "completion_rate":   features.completion_rate,
+        "avg_delay_days":    features.avg_delay_days,
+        "frequency_months":  features.frequency_months,
+        "is_overdue":        features.is_overdue,
+        "max_delay_days":    features.max_delay_days,
+        "history_size":      features.history_size,
+    }
 
-    score = (
-        3.0 * d_score
-        + 3.0 * features.overdue_count
-        + 8.0 * completion_penalty
-        + 1.5 * frequency_term
-        + 4.0 * features.is_overdue
-    )
+    X_df = pd.DataFrame([x_dict])
 
-    return float(score)
+    # Ensure column alignment with training
+    for col in _feature_cols:
+        if col not in X_df.columns:
+            X_df[col] = 0.0
+    X_df = X_df[_feature_cols]
+
+    # Apply the same scaler used during training
+    X_scaled = _scaler.transform(X_df)
+
+    # P(HIGH) — class label 2
+    proba = _model.predict_proba(X_scaled)[0]
+    classes = list(_model.classes_)
+
+    if 2 in classes:
+        high_idx = classes.index(2)
+        risk_prob = proba[high_idx]
+    else:
+        risk_prob = 0.0
+
+    return float(risk_prob * 100.0)
 
 
 def risk_level_from_score(score: float) -> str:
-    if score >= HIGH_RISK_CUTOFF:
+    if score >= _high_cutoff:
         return "high"
-    if score >= MEDIUM_RISK_CUTOFF:
+    if score >= _medium_cutoff:
         return "medium"
     return "low"
 

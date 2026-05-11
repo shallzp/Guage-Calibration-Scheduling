@@ -40,7 +40,7 @@ def update_current_batch_risk() -> int:
                 summary[level] += 1
 
         total = len(gauge_keys)
-        batch_risk = round((summary['high'] + summary['medium']) / total, 4) if total > 0 else 0.0
+        batch_risk = round((summary['high'] * 1.0 + summary['medium'] * 0.5 + summary['low'] * 0.0) / total, 4) if total > 0 else 0.0
 
         result = db['current_batches'].update_one(
             {'_id': batch['_id']},
