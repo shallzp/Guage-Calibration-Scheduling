@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 
 import GaugeDataTable, { GaugeDataTableSkeleton } from '../features/gauge/GaugeDataTable'
@@ -18,6 +18,7 @@ const DEFAULT_FILTERS = {
   frequency: 'all',
   currentStatus: 'all',
   riskLevel: 'all',
+  recommendedAction: 'all',
 }
 
 const TAB_CONFIG = [
@@ -34,11 +35,60 @@ const DEFAULT_TAB = 'gauge-overview'
 function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
   const navigate = useNavigate()
   const { tab } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
 
   // Resolve active tab from URL — fall back to default if unknown
   const activeTab = VALID_TAB_IDS.has(tab) ? tab : DEFAULT_TAB
 
-  const [filters, setFilters] = useState(DEFAULT_FILTERS)
+  const readFiltersFromParams = (params) => ({
+    query: params.get('q') ?? DEFAULT_FILTERS.query,
+    location: params.get('location') ?? DEFAULT_FILTERS.location,
+    frequency: params.get('frequency') ?? DEFAULT_FILTERS.frequency,
+    currentStatus: params.get('status') ?? DEFAULT_FILTERS.currentStatus,
+    riskLevel: params.get('risk') ?? DEFAULT_FILTERS.riskLevel,
+    recommendedAction: params.get('action') ?? DEFAULT_FILTERS.recommendedAction,
+  })
+
+  const [filters, setFilters] = useState(() => readFiltersFromParams(searchParams))
+
+    useEffect(() => {
+      if (activeTab !== 'gauge-data' && activeTab !== 'recommendations') return
+      const next = readFiltersFromParams(searchParams)
+      setFilters((previous) => {
+        if (
+          previous.query === next.query &&
+          previous.location === next.location &&
+          previous.frequency === next.frequency &&
+          previous.currentStatus === next.currentStatus &&
+          previous.riskLevel === next.riskLevel &&
+          previous.recommendedAction === next.recommendedAction
+        ) {
+          return previous
+        }
+        return next
+      })
+    }, [searchParams, activeTab])
+
+    useEffect(() => {
+      if (activeTab !== 'gauge-data' && activeTab !== 'recommendations') return
+      const next = new URLSearchParams(searchParams)
+      const setParam = (key, value, fallback) => {
+        if (value && value !== fallback) next.set(key, value)
+        else next.delete(key)
+      }
+
+      setParam('q', filters.query.trim(), '')
+      setParam('location', filters.location, DEFAULT_FILTERS.location)
+      setParam('frequency', filters.frequency, DEFAULT_FILTERS.frequency)
+      setParam('status', filters.currentStatus, DEFAULT_FILTERS.currentStatus)
+      setParam('risk', filters.riskLevel, DEFAULT_FILTERS.riskLevel)
+      setParam('action', filters.recommendedAction, DEFAULT_FILTERS.recommendedAction)
+
+      if (next.toString() !== searchParams.toString()) {
+        setSearchParams(next, { replace: true })
+      }
+    }, [filters, searchParams, setSearchParams, activeTab])
   const [slaDialog, setSlaDialog] = useState({ isOpen: false, count: 0 })
   const [slaConfig, setSlaConfig] = useState(null)
   const [isLoadingSlaConfig, setIsLoadingSlaConfig] = useState(true)
@@ -146,10 +196,13 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
     filters.location !== DEFAULT_FILTERS.location ||
     filters.frequency !== DEFAULT_FILTERS.frequency ||
     filters.currentStatus !== DEFAULT_FILTERS.currentStatus ||
-    filters.riskLevel !== DEFAULT_FILTERS.riskLevel
+    filters.riskLevel !== DEFAULT_FILTERS.riskLevel ||
+    filters.recommendedAction !== DEFAULT_FILTERS.recommendedAction
 
   const handleOpenSchedule = (gaugeKey) => {
-    navigate(`/gauge-calibration/schedule/${encodeURIComponent(gaugeKey)}`)
+    navigate(`/gauge-calibration/schedule/${encodeURIComponent(gaugeKey)}`, {
+      state: { from: location.pathname + location.search }
+    })
   }
 
   const handleFilterChange = (name, value) => {
@@ -161,6 +214,7 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
 
   const handleClearFilters = () => {
     setFilters(DEFAULT_FILTERS)
+    setSearchParams({}, { replace: true })
   }
 
   const handleRunSLA = () => {
@@ -201,7 +255,14 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
     }
   }
 
-  const recommendationCount = 0
+  const recommendationCount = useMemo(
+    () =>
+      gaugesWithSla.filter((gauge) => {
+        const action = String(gauge?.riskAction || '').toLowerCase()
+        return action.includes('increase') || action.includes('reschedule')
+      }).length,
+    [gaugesWithSla],
+  )
 
 
   // Attach counts to tabs
@@ -245,7 +306,9 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => navigate(`/gauge-calibration/${t.id}`)}
+                      onClick={() => {
+                        navigate(`/gauge-calibration/${t.id}`)
+                      }}
                       className={`shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                         isActive
                           ? 'bg-teal-700 text-white shadow-sm'
@@ -306,7 +369,14 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
             (isGaugeViewLoading || hasGaugeViewError ? (
               <GaugeRecommendationsSkeleton />
             ) : (
-              <GaugeRecommendations gauges={gaugesWithSla} />
+              <GaugeRecommendations 
+                gauges={gauges} 
+                onRecommendationApplied={onRefreshGauges} 
+                filters={filters}
+                onFilterChange={handleFilterChange}
+                onClearFilters={handleClearFilters}
+                isFilterActive={isFilterActive}
+              />
             ))}
 
           {activeTab === 'batch-plan' &&

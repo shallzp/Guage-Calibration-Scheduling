@@ -1,36 +1,22 @@
 import { useMemo, useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 
 import GaugeScheduleTable from '../features/gauge/GaugeScheduleTable'
 import DialogBox from '../components/DialogBox'
 import StakeholderModal from '../features/gauge/StakeholderModal'
 
 import { addMonthsClamped, formatDate, inputDateToDisplayDate, parseDate, toInputDate } from '../utils/dateUtils'
-import { getStakeholders, saveStakeholders } from '../utils/stakeholderData'
-import { STATUS, appendNextScheduleDate, applyOverdueRule, getCurrentDueDate, getLastCompletionDateFromSchedule, toGaugeModelFromApi } from '../utils/gaugeData'
+
+import { STATUS, toGaugeModelFromApi } from '../utils/gaugeData'
 import { apiFetch } from '../utils/api'
 
-const initialDialogState = {
-  isOpen: false,
-  gaugeKey: '',
-  rowIndex: null,
-  completionDate: '',
-  scheduledDate: '',
-}
+const initialDialogState = { isOpen: false, gaugeKey: '', rowIndex: null, completionDate: '', scheduledDate: '' }
+const initialFrequencyDialog = { isOpen: false, value: '' }
+const initialEditDateDialog = { isOpen: false, rowIndex: null, value: '' }
 
-const initialFrequencyDialog = {
-  isOpen: false,
-  value: '',
-}
-
-const initialEditDateDialog = {
-  isOpen: false,
-  rowIndex: null,
-  value: '',
-}
-
-function ScheduleCalibration({ gauges, setGauges }) {
+function ScheduleCalibration({ gauges, setGauges, onRefreshGauges }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { gaugeKey: gaugeKeyParam } = useParams()
   const routeGaugeKey = gaugeKeyParam ? decodeURIComponent(gaugeKeyParam) : ''
 
@@ -41,6 +27,37 @@ function ScheduleCalibration({ gauges, setGauges }) {
   const [stakeholderData, setStakeholderData] = useState({ operators: [], supervisors: [] })
   const [availableUsers, setAvailableUsers] = useState([])
   const [slaConfig, setSlaConfig] = useState(null)
+
+  // Tracks the anchor for the next "add schedule" row.
+  // Whichever action ran last wins — manual due-date edit OR
+  // "shift future dates" confirmation after a completion.
+  // Shape: { anchorDate: string (display format), anchorRowIndex: number } | null
+  // Persisted in localStorage so it survives navigation/refresh.
+  const LOCAL_STORAGE_KEY = routeGaugeKey ? `shiftBase:${routeGaugeKey}` : null
+
+  const [lastDateShiftBase, setLastDateShiftBaseRaw] = useState(() => {
+    if (!LOCAL_STORAGE_KEY) return null
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY)
+      return stored ? JSON.parse(stored) : null
+    } catch {
+      return null
+    }
+  })
+
+  const setLastDateShiftBase = (value) => {
+    setLastDateShiftBaseRaw(value)
+    if (!LOCAL_STORAGE_KEY) return
+    try {
+      if (value === null) {
+        localStorage.removeItem(LOCAL_STORAGE_KEY)
+      } else {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(value))
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
 
   const selectedGauge = useMemo(
     () => gauges.find((gauge) => gauge.key === routeGaugeKey) || null,
@@ -69,7 +86,7 @@ function ScheduleCalibration({ gauges, setGauges }) {
         })
       } catch {
         if (!isActive) return
-        setStakeholderData(getStakeholders(routeGaugeKey))
+        setStakeholderData({ operators: [], supervisors: [] })
       }
     }
 
@@ -159,17 +176,25 @@ function ScheduleCalibration({ gauges, setGauges }) {
         supervisors: Array.isArray(saved?.supervisors) ? saved.supervisors : [],
       }
       setStakeholderData(normalized)
-      saveStakeholders(routeGaugeKey, normalized)
     } catch {
-      saveStakeholders(routeGaugeKey, data)
-      setStakeholderData(data)
+      // Keep backend as single source of truth: do not fallback to local storage.
     } finally {
       setStakeholderModalOpen(false)
     }
   }
 
-  const handleBackToList = () => {
-    navigate('/gauge-calibration/gauge-data')
+  const handleBackToList = async () => {
+    try {
+      if (onRefreshGauges) {
+        await onRefreshGauges()
+      }
+    } finally {
+      if (location.state && location.state.from) {
+        navigate(location.state.from)
+      } else {
+        navigate('/gauge-calibration/gauge-data')
+      }
+    }
   }
 
   const openFrequencyDialog = () => {
@@ -198,8 +223,16 @@ function ScheduleCalibration({ gauges, setGauges }) {
       previous.map((gauge) => {
         if (gauge.key !== selectedGauge.key) return gauge
 
-        const baseIndex = gauge.schedule.findIndex((row) => row.status !== STATUS.COMPLETED)
-        if (baseIndex === -1) {
+        let lastCompletedIndex = -1
+        for (let i = gauge.schedule.length - 1; i >= 0; i--) {
+          if (gauge.schedule[i].status === STATUS.COMPLETED) {
+            lastCompletedIndex = i
+            break
+          }
+        }
+        
+        const baseIndex = lastCompletedIndex + 1
+        if (baseIndex >= gauge.schedule.length) {
           return {
             ...gauge,
             frequency: nextFrequency,
@@ -207,7 +240,6 @@ function ScheduleCalibration({ gauges, setGauges }) {
         }
 
         // Use the last completed row's due date as the base, or the first non-completed row's date
-        const lastCompletedIndex = baseIndex - 1
         const baseDate = lastCompletedIndex >= 0
           ? parseDate(gauge.schedule[lastCompletedIndex]?.dueDate)
           : parseDate(gauge.schedule[baseIndex]?.dueDate)
@@ -228,14 +260,12 @@ function ScheduleCalibration({ gauges, setGauges }) {
           return { ...row, dueDate: newDueDate }
         })
 
-        const schedule = applyOverdueRule(updatedRows)
+        const schedule = updatedRows
 
         return {
           ...gauge,
           frequency: nextFrequency,
           schedule,
-          dueDate: getCurrentDueDate(schedule, gauge.dueDate),
-          lastCompletionDate: getLastCompletionDateFromSchedule(schedule, gauge.lastCompletionDate),
         }
       }),
     )
@@ -257,57 +287,91 @@ function ScheduleCalibration({ gauges, setGauges }) {
       })
       .catch((err) => console.error('Update frequency network error:', err))
 
-    // Persist each shifted due date to MongoDB
-    for (const { scheduleId, dueDate } of shiftedRows) {
-      if (!scheduleId) continue
-      apiFetch(
-        `/api/gauges/${encodeURIComponent(selectedGauge.key)}/schedule/${scheduleId}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ due_date: dueDate }),
-        },
-      )
+    // Persist all shifted due dates to MongoDB in one bulk request
+    if (shiftedRows.length > 0) {
+      const updates = shiftedRows.map(r => ({ scheduleId: r.scheduleId, due_date: r.dueDate }))
+      apiFetch(`/api/gauges/${encodeURIComponent(selectedGauge.key)}/schedule-bulk`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      })
         .then(async (res) => {
-          if (!res.ok) console.error(`Freq shift failed for schedule ${scheduleId}:`, res.status)
+          if (!res.ok) console.error('Bulk frequency shift failed:', res.status)
           else {
             const updatedRecord = await res.json()
             setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
           }
         })
-        .catch((err) => console.error(`Freq shift error for schedule ${scheduleId}:`, err))
+        .catch((err) => console.error('Bulk frequency shift error:', err))
     }
   }
 
   const handleAddSchedule = () => {
     if (!selectedGauge) return
 
+    // ── Step 1: Determine the next due date ──────────────────────────────────
+    // Case A: A "shift future dates" decision was stored in localStorage.
+    //   → Use anchorDate + frequency as the new due date (one-time use).
+    //   → Clear the anchor immediately after consuming it.
+    // Case B: No anchor → use the last schedule row's due date + frequency.
+    let nextDueDate = null
+    let consumedAnchor = false
+
+    if (lastDateShiftBase) {
+      const { anchorDate } = lastDateShiftBase
+      const anchorParsed = parseDate(anchorDate)
+      if (anchorParsed) {
+        nextDueDate = formatDate(addMonthsClamped(anchorParsed, selectedGauge.frequency))
+        consumedAnchor = true
+      }
+    }
+
+    if (!nextDueDate) {
+      // Fallback: last row's due date + frequency
+      const lastRow = selectedGauge.schedule[selectedGauge.schedule.length - 1]
+      const lastDate = lastRow ? parseDate(lastRow.dueDate) : null
+      if (lastDate) {
+        nextDueDate = formatDate(addMonthsClamped(lastDate, selectedGauge.frequency))
+      }
+    }
+
+    if (!nextDueDate) return  // Cannot determine a valid date; bail out
+
+    // ── Step 2: Clear the anchor if it was consumed ──────────────────────────
+    if (consumedAnchor) {
+      setLastDateShiftBase(null)   // clears state + localStorage
+    }
+
+    // ── Step 3: Optimistically append the new row to in-memory state ─────────
+    const newRow = {
+      id: (selectedGauge.schedule.length || 0) + 1,
+      dueDate: nextDueDate,
+      status: STATUS.NOT_STARTED,
+      completionDate: '',
+    }
+
     setGauges((previous) =>
       previous.map((gauge) => {
         if (gauge.key !== selectedGauge.key) return gauge
-
-        const updatedRows = appendNextScheduleDate(gauge.schedule, gauge.frequency)
-        const schedule = applyOverdueRule(updatedRows)
-
-        return {
-          ...gauge,
-          schedule,
-          dueDate: getCurrentDueDate(schedule, gauge.dueDate),
-          lastCompletionDate: getLastCompletionDateFromSchedule(schedule, gauge.lastCompletionDate),
-        }
+        return { ...gauge, schedule: [...gauge.schedule, newRow] }
       }),
     )
 
-    // Persist to MongoDB in the background
+    // ── Step 4: Persist to MongoDB ───────────────────────────────────────────
+    // Always send the computed due_date explicitly so the backend never
+    // re-derives it from a potentially stale last DB row.
     apiFetch(`/api/gauges/${encodeURIComponent(selectedGauge.key)}/schedule`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ due_date: nextDueDate }),
     })
       .then(async (res) => {
-        if (!res.ok) console.error('Add schedule failed:', res.status, res.statusText)
-        else {
-          const updatedRecord = await res.json()
-          setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
+        if (!res.ok) {
+          console.error('Add schedule failed:', res.status, res.statusText)
+          return
         }
+        const updatedRecord = await res.json()
+        setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
       })
       .catch((err) => console.error('Add schedule network error:', err))
   }
@@ -332,62 +396,69 @@ function ScheduleCalibration({ gauges, setGauges }) {
     if (!nextDate) return
 
     const rowIndex = editDateDialog.rowIndex
-    const shiftedRows = []
+    const newBaseDate = parseDate(nextDate)
 
+    // Build the shifted rows synchronously from the current gauge data
+    // BEFORE calling setGauges (which is async) so the API call always has data.
+    const shiftedRows = selectedGauge.schedule.reduce((acc, row, index) => {
+      if (index < rowIndex) return acc
+      if (index === rowIndex) {
+        acc.push({ scheduleId: row.id, dueDate: nextDate })
+        return acc
+      }
+      if (newBaseDate) {
+        const shiftedDate = addMonthsClamped(newBaseDate, selectedGauge.frequency * (index - rowIndex))
+        acc.push({ scheduleId: row.id, dueDate: formatDate(shiftedDate) })
+      }
+      return acc
+    }, [])
+
+    // Apply the same shifts to in-memory state optimistically
     setGauges((previous) =>
       previous.map((gauge) => {
         if (gauge.key !== selectedGauge.key) return gauge
 
-        const newBaseDate = parseDate(nextDate)
-
         const updatedRows = gauge.schedule.map((row, index) => {
           if (index < rowIndex) return row
-          if (index === rowIndex) {
-            shiftedRows.push({ scheduleId: row.id, dueDate: nextDate })
-            return { ...row, dueDate: nextDate }
-          }
-          // Shift all future rows based on the new date + frequency
+          if (index === rowIndex) return { ...row, dueDate: nextDate }
           if (newBaseDate) {
             const shiftedDate = addMonthsClamped(newBaseDate, gauge.frequency * (index - rowIndex))
-            const newDueDate = formatDate(shiftedDate)
-            shiftedRows.push({ scheduleId: row.id, dueDate: newDueDate })
-            return { ...row, dueDate: newDueDate }
+            return { ...row, dueDate: formatDate(shiftedDate) }
           }
           return row
         })
 
-        const schedule = applyOverdueRule(updatedRows)
-
-        return {
-          ...gauge,
-          schedule,
-          dueDate: getCurrentDueDate(schedule, gauge.dueDate),
-          lastCompletionDate: getLastCompletionDateFromSchedule(schedule, gauge.lastCompletionDate),
-        }
+        return { ...gauge, schedule: updatedRows }
       }),
     )
 
+    // Only set the anchor if this is the very last row in the schedule.
+    // If there are future rows, they just got shifted, so "Add Schedule"
+    // can safely fall back to using the last row's date.
+    if (rowIndex === selectedGauge.schedule.length - 1) {
+      setLastDateShiftBase({ anchorDate: nextDate, anchorRowIndex: rowIndex })
+    } else {
+      setLastDateShiftBase(null)
+    }
+
     closeEditDueDate()
 
-    // Persist all shifted rows to MongoDB in the background
-    for (const { scheduleId, dueDate } of shiftedRows) {
-      if (!scheduleId) continue
-      apiFetch(
-        `/api/gauges/${encodeURIComponent(selectedGauge.key)}/schedule/${scheduleId}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ due_date: dueDate }),
-        },
-      )
+    // Persist all shifted rows to MongoDB in the background via bulk request
+    if (shiftedRows.length > 0) {
+      const updates = shiftedRows.map(r => ({ scheduleId: r.scheduleId, due_date: r.dueDate }))
+      apiFetch(`/api/gauges/${encodeURIComponent(selectedGauge.key)}/schedule-bulk`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      })
         .then(async (res) => {
-          if (!res.ok) console.error(`Update due date failed for schedule ${scheduleId}:`, res.status)
+          if (!res.ok) console.error('Bulk update due date failed:', res.status)
           else {
             const updatedRecord = await res.json()
             setGauges((prev) => prev.map((g) => (g.key === selectedGauge.key ? toGaugeModelFromApi(updatedRecord) : g)))
           }
         })
-        .catch((err) => console.error(`Update due date error for schedule ${scheduleId}:`, err))
+        .catch((err) => console.error('Bulk update due date error:', err))
     }
   }
 
@@ -430,18 +501,10 @@ function ScheduleCalibration({ gauges, setGauges }) {
           }
         })
 
-        const schedule = applyOverdueRule(updatedRows)
-        const nextDueDate = schedule[rowIndex + 1]?.dueDate || getCurrentDueDate(schedule, gauge.dueDate)
-        const lastCompletionDate =
-          nextStatus === STATUS.COMPLETED
-            ? schedule[rowIndex]?.completionDate || gauge.lastCompletionDate
-            : getLastCompletionDateFromSchedule(schedule, gauge.lastCompletionDate)
-
+        const schedule = updatedRows
         return {
           ...gauge,
           schedule,
-          dueDate: nextDueDate,
-          lastCompletionDate,
         }
       }),
     )
@@ -450,7 +513,9 @@ function ScheduleCalibration({ gauges, setGauges }) {
       setConfirmDialog(confirmData)
     }
 
-    // Persist to MongoDB in the background
+    // Persist status to MongoDB in the background.
+    // Do NOT replace the full gauge from the response — it would overwrite
+    // any in-memory date shifts that have not propagated to the DB yet.
     if (scheduleId) {
       apiFetch(
         `/api/gauges/${encodeURIComponent(selectedGauge.key)}/schedule/${scheduleId}`,
@@ -483,56 +548,102 @@ function ScheduleCalibration({ gauges, setGauges }) {
       return
     }
 
+    const baseGauge = gauges.find((gauge) => gauge.key === gaugeKey)
+    const completedRow = baseGauge?.schedule?.[rowIndex]
+    const completionBaseDate = parseDate(completionDate)
+    if (!baseGauge || !completedRow || !completionBaseDate) {
+      closeDialog()
+      return
+    }
+
+    const sortedSchedule = [...(baseGauge.schedule || [])].sort((a, b) => Number(a.id) - Number(b.id))
+    const baseIndex = sortedSchedule.findIndex((row) => Number(row.id) === Number(completedRow.id))
+    if (baseIndex === -1) {
+      closeDialog()
+      return
+    }
+
+    const shiftMap = new Map()
+    for (let i = baseIndex + 1; i < sortedSchedule.length; i++) {
+      const row = sortedSchedule[i]
+      const shiftedDate = addMonthsClamped(completionBaseDate, baseGauge.frequency * (i - baseIndex))
+      shiftMap.set(row.id, formatDate(shiftedDate))
+    }
+
     // Collect shifted rows for API persistence
-    const shiftedRows = []
+    const shiftedRows = Array.from(shiftMap.entries()).map(([scheduleId, dueDate]) => ({ scheduleId, dueDate }))
 
-    setGauges((previous) =>
-      previous.map((gauge) => {
-        if (gauge.key !== gaugeKey) return gauge
+    // Apply date shifts to in-memory state (if any future rows)
+    if (shiftMap.size > 0) {
+      setGauges((previous) =>
+        previous.map((gauge) => {
+          if (gauge.key !== gaugeKey) return gauge
 
-        const completionBaseDate = parseDate(completionDate)
-        if (!completionBaseDate) return gauge
+          const updatedRows = gauge.schedule.map((row) => {
+            if (!shiftMap.has(row.id)) return row
+            return { 
+              ...row, 
+              dueDate: shiftMap.get(row.id),
+              status: STATUS.NOT_STARTED,
+              completionDate: ''
+            }
+          })
 
-        const updatedRows = gauge.schedule.map((row, index) => {
-          if (index <= rowIndex) return row
-          const shiftedDate = addMonthsClamped(completionBaseDate, gauge.frequency * (index - rowIndex))
-          const newDueDate = formatDate(shiftedDate)
-          shiftedRows.push({ scheduleId: row.id, dueDate: newDueDate })
-          return { ...row, dueDate: newDueDate }
-        })
+          return {
+            ...gauge,
+            schedule: updatedRows,
+          }
+        }),
+      )
+    }
 
-        const schedule = applyOverdueRule(updatedRows)
-        const nextDueDate = schedule[rowIndex + 1]?.dueDate || getCurrentDueDate(schedule, gauge.dueDate)
-        return {
-          ...gauge,
-          schedule,
-          dueDate: nextDueDate,
-          lastCompletionDate: schedule[rowIndex]?.completionDate || gauge.lastCompletionDate,
-        }
-      }),
-    )
+    // Only save the anchor if there are NO future rows to shift.
+    // If future rows exist, their dates are updated, and "Add Schedule"
+    // will just append properly after the last one.
+    if (shiftMap.size === 0) {
+      setLastDateShiftBase({ anchorDate: completionDate, anchorRowIndex: rowIndex })
+    } else {
+      setLastDateShiftBase(null)
+    }
 
     closeDialog()
 
-    // Persist each shifted row to MongoDB in the background
-    for (const { scheduleId, dueDate } of shiftedRows) {
-      if (!scheduleId) continue
-      apiFetch(
-        `/api/gauges/${encodeURIComponent(gaugeKey)}/schedule/${scheduleId}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ due_date: dueDate }),
-        },
-      )
+    // Build the bulk updates payload.
+    // Always include the completed row's status + completion_date.
+    // Append future date shifts if any exist.
+    const updates = []
+    if (completedRow?.id) {
+      updates.push({
+        scheduleId: completedRow.id,
+        status: STATUS.COMPLETED,
+        completion_date: completionDate,
+      })
+    }
+    shiftedRows.forEach((r) => {
+      updates.push({ 
+        scheduleId: r.scheduleId, 
+        due_date: r.dueDate,
+        status: STATUS.NOT_STARTED,
+        completion_date: null
+      })
+    })
+
+    // Always fire the bulk API to persist at minimum the completion status.
+    // When future rows exist the shifted dates are persisted atomically in the same call.
+    if (updates.length > 0) {
+      apiFetch(`/api/gauges/${encodeURIComponent(gaugeKey)}/schedule-bulk`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      })
         .then(async (res) => {
-          if (!res.ok) console.error(`Shift date failed for schedule ${scheduleId}:`, res.status)
+          if (!res.ok) console.error('Bulk shift future dates failed:', res.status)
           else {
             const updatedRecord = await res.json()
             setGauges((prev) => prev.map((g) => (g.key === gaugeKey ? toGaugeModelFromApi(updatedRecord) : g)))
           }
         })
-        .catch((err) => console.error(`Shift date error for schedule ${scheduleId}:`, err))
+        .catch((err) => console.error('Bulk shift future dates error:', err))
     }
   }
 

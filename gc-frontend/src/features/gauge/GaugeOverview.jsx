@@ -196,7 +196,7 @@ function GaugeOverview({ gauges = [] }) {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-200 bg-white/90 p-4">
               <p className="text-xs font-semibold tracking-[0.24em] text-slate-500">TOTAL GAUGES</p>
-              <p className="mt-6 text-5xl font-bold text-slate-900">{derived.total}</p>
+              <p className="mt-6 text-3xl font-bold text-slate-900">{derived.total}</p>
             </div>
 
             <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4">
@@ -206,7 +206,7 @@ function GaugeOverview({ gauges = [] }) {
                   {formatPercent(derived.highPct)}
                 </span>
               </div>
-              <p className="mt-6 text-5xl font-bold text-rose-700">{derived.high}</p>
+              <p className="mt-6 text-3xl font-bold text-rose-700">{derived.high}</p>
             </div>
 
             <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
@@ -216,7 +216,7 @@ function GaugeOverview({ gauges = [] }) {
                   {formatPercent(derived.mediumPct)}
                 </span>
               </div>
-              <p className="mt-6 text-5xl font-bold text-amber-700">{derived.medium}</p>
+              <p className="mt-6 text-3xl font-bold text-amber-700">{derived.medium}</p>
             </div>
 
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
@@ -226,28 +226,28 @@ function GaugeOverview({ gauges = [] }) {
                   {formatPercent(derived.lowPct)}
                 </span>
               </div>
-              <p className="mt-6 text-5xl font-bold text-emerald-700">{derived.low}</p>
+              <p className="mt-6 text-3xl font-bold text-emerald-700">{derived.low}</p>
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white/90 p-5">
-            <h3 className="text-3xl font-bold text-slate-900">Batch Summary</h3>
+            <h3 className="text-2xl font-bold text-slate-900">Batch Summary</h3>
             <p className="mt-1 text-sm text-slate-500">Compact view of actionable scheduling changes.</p>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs font-semibold tracking-[0.2em] text-slate-500">ACTIONABLE</p>
-                <p className="mt-3 text-3xl font-bold text-slate-900">{derived.actionable}</p>
+                <p className="mt-3 text-2xl font-bold text-slate-900">{derived.actionable}</p>
                 <p className="mt-1 text-xs text-slate-500">high + medium risk</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs font-semibold tracking-[0.2em] text-slate-500">STABLE</p>
-                <p className="mt-3 text-3xl font-bold text-slate-900">{derived.stable}</p>
+                <p className="mt-3 text-2xl font-bold text-slate-900">{derived.stable}</p>
                 <p className="mt-1 text-xs text-slate-500">low risk gauges</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs font-semibold tracking-[0.2em] text-slate-500">OVERDUE</p>
-                <p className="mt-3 text-3xl font-bold text-slate-900">{derived.overdue}</p>
+                <p className="mt-3 text-2xl font-bold text-slate-900">{derived.overdue}</p>
                 <p className="mt-1 text-xs text-slate-500">past due schedule</p>
               </div>
             </div>
@@ -255,7 +255,7 @@ function GaugeOverview({ gauges = [] }) {
         </div>
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white/90 p-5">
-          <h3 className="text-3xl font-bold text-slate-900">Risk Distribution</h3>
+          <h3 className="text-2xl font-bold text-slate-900">Risk Distribution</h3>
           <p className="mt-1 text-sm text-slate-500">Horizontal risk split across the current gauge population.</p>
 
           <div className="mt-5 space-y-4">

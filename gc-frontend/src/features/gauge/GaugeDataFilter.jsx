@@ -1,12 +1,15 @@
 import FilterSelect from '../../components/FilterSelect'
 import { Search, MapPin, Timer, Activity, AlertTriangle } from 'lucide-react'
 
-const FILTER_FIELDS = [
-  { key: 'location', ariaLabel: 'Filter by location', icon  : MapPin },
-  { key: 'frequency', ariaLabel: 'Filter by frequency', icon: Timer },
-  { key: 'currentStatus', ariaLabel: 'Filter by current status', icon: Activity },
-  { key: 'riskLevel', ariaLabel: 'Filter by risk level', icon: AlertTriangle },
-]
+const FILTER_FIELD_CONFIG = {
+  location: { key: 'location', ariaLabel: 'Filter by location', icon: MapPin },
+  frequency: { key: 'frequency', ariaLabel: 'Filter by frequency', icon: Timer },
+  currentStatus: { key: 'currentStatus', ariaLabel: 'Filter by current status', icon: Activity },
+  recommendedAction: { key: 'recommendedAction', ariaLabel: 'Filter by recommended action', icon: Activity },
+  riskLevel: { key: 'riskLevel', ariaLabel: 'Filter by risk level', icon: AlertTriangle },
+}
+
+const DEFAULT_FILTER_FIELD_KEYS = ['location', 'frequency', 'currentStatus', 'riskLevel']
 
 
 export function GaugeFiltersSkeleton() {
@@ -25,7 +28,7 @@ export function GaugeFiltersSkeleton() {
   )
 }
 
-function GaugeDataFilter({ filters, onFilterChange, onClearFilters, isFilterActive, options }) {
+function GaugeDataFilter({ filters, onFilterChange, onClearFilters, isFilterActive, options, fieldKeys = DEFAULT_FILTER_FIELD_KEYS }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -52,13 +55,15 @@ function GaugeDataFilter({ filters, onFilterChange, onClearFilters, isFilterActi
           />
         </div>
 
-        {FILTER_FIELDS.map((field) => {
+        {fieldKeys.map((fieldKey) => {
+          const field = FILTER_FIELD_CONFIG[fieldKey]
+          if (!field) return null
           return (
             <FilterSelect
               key={field.key}
               value={filters[field.key]}
               onChange={(value) => onFilterChange(field.key, value)}
-              options={options[field.key]}
+              options={options[field.key] || []}
               ariaLabel={field.ariaLabel}
               leadingIcon={field.icon ? <field.icon className="h-4 w-4" aria-hidden="true" /> : null}
             />

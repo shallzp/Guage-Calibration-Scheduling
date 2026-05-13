@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import SortableHeader from '../../components/SortableHeader'
 import Pagination from '../../components/Pagination'
 import TableSkeleton from '../../components/TableSkeleton'
@@ -23,12 +24,29 @@ export function SummaryTableSkeleton({ title }) {
 }
 
 function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [], clearFilterTrigger = 0, onSortChange }) {
-    const [currentPage, setCurrentPage] = useState(1)
+    const [searchParams, setSearchParams] = useSearchParams()
+    const pageParam = parseInt(searchParams.get('page') || '1', 10)
+    const currentPage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam
+
+    const setCurrentPage = (page) => {
+        const next = new URLSearchParams(searchParams)
+        if (page === 1) {
+            next.delete('page')
+        } else {
+            next.set('page', page.toString())
+        }
+        setSearchParams(next, { replace: true })
+    }
     const [sortField, setSortField] = useState(null)
     const [sortDirection, setSortDirection] = useState('asc')
 
+    const isInitialMount = useRef(true)
     useEffect(() => {
-        setCurrentPage(1)
+        if (isInitialMount.current) {
+            isInitialMount.current = false
+        } else {
+            setCurrentPage(1)
+        }
     }, [rows])
 
     useEffect(() => {

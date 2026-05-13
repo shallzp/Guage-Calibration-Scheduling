@@ -9,6 +9,7 @@ import pandas as pd
 
 from pymongo import MongoClient
 from pymongo.database import Database
+from app.core.config import LOCAL_ENV_PATH
 
 _client: MongoClient | None = None
 _database: Database | None = None
@@ -21,7 +22,7 @@ def _load_local_dotenv() -> None:
     if _dotenv_loaded:
         return
 
-    dotenv_path = Path(__file__).resolve().parents[2] / '.env'
+    dotenv_path = Path(LOCAL_ENV_PATH)
     if not dotenv_path.exists():
         _dotenv_loaded = True
         return

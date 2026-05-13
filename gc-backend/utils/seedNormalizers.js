@@ -3,9 +3,7 @@ const { parseDateValue } = require('./gaugeUtils');
 
 // ── Batch-key date helpers ────────────────────────────────────────────────────
 
-/**
- * Converts a BATCH-YYYYMMDD key into a JS Date (UTC midnight).
- */
+// Converts a BATCH-YYYYMMDD key into a JS Date (UTC midnight).
 function batchKeyToDate(key) {
   const raw = key.replace('BATCH-', '');
   const y = raw.slice(0, 4);
@@ -14,10 +12,7 @@ function batchKeyToDate(key) {
   return new Date(`${y}-${m}-${d}T00:00:00.000Z`);
 }
 
-/**
- * Parses a date value that may be a Date, ISO string, or DD/MM/YYYY string.
- * Returns a Date or null.
- */
+// Parses a date value that may be a Date, ISO string, or DD/MM/YYYY string.
 function parseAnyDate(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
@@ -143,13 +138,13 @@ function toPreviousBatchDocument(record) {
 /**
  * Derives current_batches and previous_batches from the gauges array.
  *
- * For each gauge:
- *  - batch_keys entries marked 'current'  → add to current_batches
- *  - batch_keys entries marked 'previous' → add to previous_batches
- *    with a backfilled snapshot from the matching schedule_table row
+ * Snapshot policy for previous_batches (seeding):
+ *   - Fields calculable from schedule_table are backfilled with real values.
+ *   - ML-dependent fields (risk_score, risk_level) are null — they have no
+ *     historical ML output at seed time and will never be overwritten
+ *     (write-once policy in upsertPreviousBatch).
  */
 function buildBatchSeedData(gauges) {
-  // Maps: batchKey → { date, gauge_keys[], snapshot[] }
   const currentMap  = {};
   const previousMap = {};
 
@@ -163,15 +158,16 @@ function buildBatchSeedData(gauges) {
 
       const batchDate = batchKeyToDate(key);
 
+      // ── current_batches ───────────────────────────────────────────────────
       if (status === 'current') {
         if (!currentMap[key]) {
           currentMap[key] = {
-            _id: key,
-            date: batchDate,
-            gauge_keys: [],
-            gauge_count: 0,
+            _id:          key,
+            date:         batchDate,
+            gauge_keys:   [],
+            gauge_count:  0,
             risk_summary: { high: 0, medium: 0, low: 0 },
-            batch_risk: 0,
+            batch_risk:   0,
             generated_at: new Date(),
           };
         }
@@ -179,39 +175,50 @@ function buildBatchSeedData(gauges) {
         currentMap[key].gauge_count++;
       }
 
+      // ── previous_batches ──────────────────────────────────────────────────
       if (status === 'previous') {
         if (!previousMap[key]) {
           previousMap[key] = {
-            _id: key,
-            date: batchDate,
-            gauge_keys: [],
-            gauge_count: 0,
+            _id:          key,
+            date:         batchDate,
+            gauge_keys:   [],
+            gauge_count:  0,
             risk_summary: { high: 0, medium: 0, low: 0 },
             generated_at: batchDate,
-            archived_at: batchDate,
-            snapshot: [],
+            archived_at:  batchDate,
+            snapshot:     [],
           };
         }
 
         previousMap[key].gauge_keys.push(gauge.gauge_key);
         previousMap[key].gauge_count++;
 
-        // ── Backfill snapshot from matching schedule_table row ────────────
-        // Find the row whose due_date matches the batch date
-        const matchRow = scheduleRows.find((row) => sameDayUtc(row.due_date, batchDate));
-
-        const delay_days = matchRow
-          ? calcDelayDays(matchRow.due_date, matchRow.completion_date)
-          : null;
+        const matchRow   = scheduleRows.find((row) => sameDayUtc(row.due_date, batchDate));
+        const delay_days = matchRow ? calcDelayDays(matchRow.due_date, matchRow.completion_date) : null;
+        const days_overdue = (delay_days !== null && delay_days > 0) ? delay_days : 0;
 
         previousMap[key].snapshot.push({
-          gauge_key:          gauge.gauge_key,
-          risk_score:         null,
-          risk_level:         null,
-          days_until_due:     0,
-          frequency_at_batch: frequency,
-          completion_status:  matchRow ? matchRow.status : null,
-          delay_days,
+          gauge_key:             gauge.gauge_key,
+          // ML prediction fields — null at seed time
+          risk_score:            null,
+          risk_level:            null,
+          action:                null,
+          reason:                null,
+          recommended_frequency: null,
+          recommended_due_date:  null,
+          // ML feature fields — null at seed, except what schedule gives us
+          days_until_due:        0,
+          days_overdue,
+          is_overdue:            null,
+          overdue_count:         null,
+          completion_rate:       null,
+          avg_delay_days:        delay_days,  // best available from schedule data
+          max_delay_days:        null,
+          predicted_overrun:     null,
+          history_size:          null,
+          // gauge root
+          frequency_at_batch:    frequency,
+          // completion_status intentionally absent
         });
       }
     }
@@ -247,56 +254,61 @@ function buildAllBatchesSeedData(gauges) {
 
       if (!batchMap[key]) {
         batchMap[key] = {
-          _id: key,
-          date: batchDate,
-          gauge_keys: [],
-          gauge_count: 0,
+          _id:          key,
+          date:         batchDate,
+          gauge_keys:   [],
+          gauge_count:  0,
           risk_summary: { high: 0, medium: 0, low: 0 },
-          batch_risk: 0,
-          batch_status: null,        // derived below after all gauges are added
+          batch_risk:   0,
+          batch_status: null,
           generated_at: batchDate,
-          archived_at: status === 'previous' ? batchDate : null,
-          snapshot: [],
+          archived_at:  status === 'previous' ? batchDate : null,
+          snapshot:     [],
         };
       }
 
       const batch = batchMap[key];
-
-      // gauge_keys → store { gauge_key, status } dict
       batch.gauge_keys.push({ gauge_key: gauge.gauge_key, status: status ?? null });
       batch.gauge_count++;
 
-      // Backfill snapshot from the matching schedule_table row
-      const matchRow = scheduleRows.find((row) => sameDayUtc(row.due_date, batchDate));
-      const delay_days = matchRow
-        ? calcDelayDays(matchRow.due_date, matchRow.completion_date)
-        : null;
+      const matchRow   = scheduleRows.find((row) => sameDayUtc(row.due_date, batchDate));
+      const delay_days = matchRow ? calcDelayDays(matchRow.due_date, matchRow.completion_date) : null;
+      const days_overdue = (delay_days !== null && delay_days > 0) ? delay_days : 0;
 
       batch.snapshot.push({
-        gauge_key:          gauge.gauge_key,
-        risk_score:         null,
-        risk_level:         null,
-        days_until_due:     0,
-        frequency_at_batch: frequency,
-        completion_status:  matchRow ? matchRow.status : null,
-        delay_days,
+        gauge_key:             gauge.gauge_key,
+        // ML prediction fields — null at seed time
+        risk_score:            null,
+        risk_level:            null,
+        action:                null,
+        reason:                null,
+        recommended_frequency: null,
+        recommended_due_date:  null,
+        // ML feature fields — null at seed, except what schedule gives us
+        days_until_due:        0,
+        days_overdue,
+        is_overdue:            null,
+        overdue_count:         null,
+        completion_rate:       null,
+        avg_delay_days:        delay_days,
+        max_delay_days:        null,
+        predicted_overrun:     null,
+        history_size:          null,
+        // gauge root
+        completion_status:     matchRow ? matchRow.status : null,
+        frequency_at_batch:    frequency,
       });
     }
   }
 
-  // Derive batch_status from the statuses of its gauges:
-  //   any 'current'  → 'current'
-  //   all 'previous' → 'previous'
-  //   all null       → 'upcoming'
   for (const batch of Object.values(batchMap)) {
     const statuses = batch.gauge_keys.map((g) => g.status);
-    if (statuses.includes('current')) {
+    if (statuses.includes('current'))           
       batch.batch_status = 'current';
-    } else if (statuses.every((s) => s === 'previous')) {
+    else if (statuses.every((s) => s === 'previous')) 
       batch.batch_status = 'previous';
-    } else {
+    else                                         
       batch.batch_status = 'upcoming';
-    }
   }
 
   return Object.values(batchMap);

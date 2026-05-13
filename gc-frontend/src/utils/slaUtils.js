@@ -211,9 +211,7 @@ export function applySLAConfigToGauges(gauges, config = null) {
     }))
 }
 
-/**
- * Parses a "DD/MM/YYYY HH:MM AM/PM" string produced by formatDateTime.
- */
+// Parses a "DD/MM/YYYY HH:MM AM/PM" string produced by formatDateTime.
 function parseDateTime(str) {
     if (!str || str === '-') return null
     const parts = str.split(' ')

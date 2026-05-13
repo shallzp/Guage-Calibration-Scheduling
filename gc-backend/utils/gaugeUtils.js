@@ -11,6 +11,7 @@ const ALLOWED_PATCH_FIELDS = new Set([
   'schedule_table',
   'stakeholders',
   'batch_keys',
+  'latest_prediction',
 ]);
 
 
@@ -80,6 +81,23 @@ function normalizeScheduleRow(row, index) {
   };
 }
 
+function normalizeLatestPredictionPatch(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const normalized = {};
+
+  if ('risk_score' in source) normalized.risk_score = source.risk_score ?? null;
+  if ('risk_level' in source) normalized.risk_level = source.risk_level ?? null;
+  if ('action' in source) normalized.action = source.action ?? null;
+  if ('reason' in source) normalized.reason = source.reason ?? null;
+  if ('signals' in source) normalized.signals = Array.isArray(source.signals) ? source.signals : [];
+  if ('issue_type' in source) normalized.issue_type = source.issue_type ?? null;
+  if ('recommended_frequency' in source) normalized.recommended_frequency = source.recommended_frequency ?? null;
+  if ('recommended_due_date' in source) normalized.recommended_due_date = parseDateValue(source.recommended_due_date);
+  if ('scored_at' in source) normalized.scored_at = parseDateValue(source.scored_at);
+
+  return normalized;
+}
+
 
 // Gauge patch sanitizer
 function sanitizeGaugePatch(payload, { normalizeStakeholdersPayload }) {
@@ -101,6 +119,11 @@ function sanitizeGaugePatch(payload, { normalizeStakeholdersPayload }) {
       patch.schedule_table = Array.isArray(payload[field])
         ? payload[field].map((row, index) => normalizeScheduleRow(row, index))
         : [];
+      return;
+    }
+
+    if (field === 'latest_prediction') {
+      patch.latest_prediction = normalizeLatestPredictionPatch(payload[field]);
       return;
     }
 
@@ -126,9 +149,35 @@ function sanitizeGaugePatch(payload, { normalizeStakeholdersPayload }) {
   return patch;
 }
 
+const OVERDUE_THRESHOLD_DAYS = 15;
+
+/**
+ * Returns the correct status for a non-completed schedule row based on today.
+ * - 'overdue'     if due_date was >= OVERDUE_THRESHOLD_DAYS ago
+ * - 'in-progress' if due_date is in the past but within threshold (or today)
+ * - 'not-started' if due_date is in the future
+ *
+ * Returns null if due_date is missing/invalid (caller should skip the row).
+ */
+function deriveRowStatus(row, today) {
+  if (!row.due_date) return null;
+  const due = new Date(row.due_date);
+  due.setHours(0, 0, 0, 0);
+  if (isNaN(due.getTime())) return null;
+
+  const daysSinceDue = Math.floor((today - due) / (1000 * 60 * 60 * 24));
+
+  if (daysSinceDue >= OVERDUE_THRESHOLD_DAYS) return 'overdue';
+  if (daysSinceDue >= 0) return 'in-progress'; // due today or recently past — active
+  return 'not-started';                         // due in the future
+}
+
+
 module.exports = {
   parseDateValue,
   normalizeScheduleStatus,
   normalizeScheduleRow,
+  normalizeLatestPredictionPatch,
   sanitizeGaugePatch,
+  deriveRowStatus
 };

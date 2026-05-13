@@ -15,8 +15,7 @@ const { toCampaignDocument, toUserDocument, toGaugeDocument, buildBatchSeedData,
 
 const campaignData = require('./data/campaign/campaignData.json');
 const partsDispatchData = require('./data/campaign/partsDispatchData.json');
-// const gaugeListData = require('./data/gauge/gaugeList.json');
-const gaugeListData = require('./data/gauges.json');
+const gaugeListData = require('./data/gauge/gaugeList.json');
 const usersData = require('./data/gauge/users.json');
 
 dotenv.config();

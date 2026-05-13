@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
-import { NavLink, useParams } from 'react-router-dom'
+import { NavLink, useParams, useSearchParams } from 'react-router-dom'
 
 import { normalizeCampaignRow, toSelectOptions, buildCampaignOverviewRows, buildSummaryRows } from '../utils/campaignData'
 
@@ -41,12 +41,56 @@ const MONTH_LABELS = {
 
 function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasError }) {
   const { tab } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const selectedDashboard = TAB_CONFIG.some((opt) => opt.id === tab)
     ? tab
     : TAB_CONFIG[0].id
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS)
+    const readFiltersFromParams = (params) => ({
+      campaignStatus: params.get('campaignStatus') ?? DEFAULT_FILTERS.campaignStatus,
+      region: params.get('region') ?? DEFAULT_FILTERS.region,
+      areaOffice: params.get('areaOffice') ?? DEFAULT_FILTERS.areaOffice,
+      companyCode: params.get('companyCode') ?? DEFAULT_FILTERS.companyCode,
+      plantCode: params.get('plantCode') ?? DEFAULT_FILTERS.plantCode,
+      campaignType: params.get('campaignType') ?? DEFAULT_FILTERS.campaignType,
+      campaignDesc: params.get('campaignDesc') ?? DEFAULT_FILTERS.campaignDesc,
+      chassisNo: params.get('chassisNo') ?? DEFAULT_FILTERS.chassisNo,
+      year: params.get('year') ?? DEFAULT_FILTERS.year,
+      month: params.get('month') ?? DEFAULT_FILTERS.month,
+    })
+
+    useEffect(() => {
+      const next = readFiltersFromParams(searchParams)
+      setFilters((previous) => {
+        if (JSON.stringify(previous) === JSON.stringify(next)) return previous
+        return next
+      })
+    }, [searchParams])
+
+    useEffect(() => {
+      const next = new URLSearchParams(searchParams)
+      const setParam = (key, value, fallback) => {
+        if (value && value !== fallback) next.set(key, value)
+        else next.delete(key)
+      }
+
+      setParam('campaignStatus', filters.campaignStatus, DEFAULT_FILTERS.campaignStatus)
+      setParam('region', filters.region, DEFAULT_FILTERS.region)
+      setParam('areaOffice', filters.areaOffice, DEFAULT_FILTERS.areaOffice)
+      setParam('companyCode', filters.companyCode, DEFAULT_FILTERS.companyCode)
+      setParam('plantCode', filters.plantCode, DEFAULT_FILTERS.plantCode)
+      setParam('campaignType', filters.campaignType, DEFAULT_FILTERS.campaignType)
+      setParam('campaignDesc', filters.campaignDesc, DEFAULT_FILTERS.campaignDesc)
+      setParam('chassisNo', filters.chassisNo, DEFAULT_FILTERS.chassisNo)
+      setParam('year', filters.year, DEFAULT_FILTERS.year)
+      setParam('month', filters.month, DEFAULT_FILTERS.month)
+
+      if (next.toString() !== searchParams.toString()) {
+        setSearchParams(next, { replace: true })
+      }
+    }, [filters, searchParams, setSearchParams])
   const [clearFilterTrigger, setClearFilterTrigger] = useState(0)
   const [isTableSorted, setIsTableSorted] = useState(false)
 
@@ -128,6 +172,7 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
   const handleClearFilters = () => {
     setFilters(DEFAULT_FILTERS)
     setClearFilterTrigger((prev) => prev + 1)
+    setSearchParams({}, { replace: true })
   }
 
   return (
@@ -148,7 +193,10 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
               {TAB_CONFIG.map((option) => (
                 <NavLink
                   key={option.id}
-                  to={`/campaign/${option.id}`}
+                  to={{
+                    pathname: `/campaign/${option.id}`,
+                    search: searchParams.toString() ? `?${searchParams.toString()}` : '',
+                  }}
                   className={({ isActive }) =>
                     `shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                       isActive || (!tab && option.id === TAB_CONFIG[0].id)
@@ -164,7 +212,7 @@ function CampaignDashboard({ campaignData, partsDispatchData, isLoading, hasErro
           </div>
 
           {showFilters && (
-            <div className="mt-5">
+            <div className="my-5">
               {isLoading || hasError ? (
                 <CampaignFiltersSkeleton />
               ) : (

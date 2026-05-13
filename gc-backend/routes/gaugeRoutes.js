@@ -1,13 +1,113 @@
 const express = require('express');
 const Gauge = require('../models/gauge/Gauge');
 
-const { sanitizeGaugePatch, normalizeScheduleStatus, parseDateValue } = require('../utils/gaugeUtils');
+const { sanitizeGaugePatch, normalizeScheduleStatus, parseDateValue, deriveRowStatus } = require('../utils/gaugeUtils');
 
 const { normalizeStakeholdersPayload, hydrateStakeholders } = require('../utils/stakeholderUtils');
 const { computeRiskSummary } = require('../utils/riskUtils');
 const { computeBatchKeys, computeGaugeDates, computeGaugeStatus, syncBatchCollections } = require('../utils/batchUtils');
 
 const router = express.Router();
+
+
+// overdue recalculation
+
+/**
+ * Called once on app load (from App.jsx before gauges are fetched).
+ *
+ * Re-derives the correct status for every non-completed schedule row,
+ * correcting any stale values (including wrongly-set 'overdue' entries
+ * whose due_date may have been shifted forward).
+ *
+ * Only gauges with at least one row that actually changed are written to DB.
+ * Batch collections are synced for every gauge that was updated.
+ */
+router.post('/recalculate-overdue', async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Fetch all gauges that have at least one non-completed row
+    const gauges = await Gauge.find({
+      'schedule_table': {
+        $elemMatch: { status: { $ne: 'completed' } },
+      },
+    }).lean();
+
+    const results = { checked: gauges.length, updated: 0, skipped: 0 };
+
+    for (const gauge of gauges) {
+      const rows = Array.isArray(gauge.schedule_table) ? gauge.schedule_table : [];
+
+      // Only promote rows to overdue; do not downgrade other statuses.
+      const rowsToUpdate = rows
+        .filter((row) => row.status !== 'completed')
+        .map((row) => {
+          const correctStatus = deriveRowStatus(row, today);
+          if (!correctStatus) return null; // invalid due_date — skip
+          //if(correctStatus === row.status) return null; //alredy correct - skip
+          if (correctStatus !== 'overdue') return null;
+          if (row.status === 'overdue') return null; // already overdue — skip
+          return { row, correctStatus };
+        })
+        .filter(Boolean);
+
+      if (rowsToUpdate.length === 0) {
+        results.skipped++;
+        continue;
+      }
+
+      // Single bulk update for all rows that need changing in this gauge
+      const finalSetFields = {};
+      const arrayFilters   = [];
+
+      for (const { row, correctStatus } of rowsToUpdate) {
+        const filterId = `row${row.schedule_id}`;
+        finalSetFields[`schedule_table.$[${filterId}].status`] = correctStatus;
+        arrayFilters.push({ [`${filterId}.schedule_id`]: row.schedule_id });
+      }
+
+      const afterUpdate = await Gauge.findOneAndUpdate(
+        { gauge_key: gauge.gauge_key },
+        { $set: finalSetFields },
+        { returnDocument: 'after', arrayFilters },
+      ).lean();
+
+      if (!afterUpdate) continue;
+
+      // Recompute derived gauge-level fields from the corrected schedule
+      const batchKeys   = computeBatchKeys(afterUpdate.schedule_table);
+      const gaugeDates  = computeGaugeDates(afterUpdate.schedule_table, batchKeys);
+      const gaugeStatus = computeGaugeStatus(afterUpdate.schedule_table, batchKeys);
+
+      await Gauge.findOneAndUpdate(
+        { gauge_key: gauge.gauge_key },
+        {
+          $set: {
+            batch_keys:           batchKeys,
+            due_date:             gaugeDates.due_date,
+            last_completion_date: gaugeDates.last_completion_date,
+            status:               gaugeStatus,
+          },
+        },
+      );
+
+      // Sync batch collections — non-blocking, errors are logged not thrown
+      syncBatchCollections(gauge.gauge_key, gauge.batch_keys, batchKeys).catch((err) =>
+        console.error(`syncBatchCollections (recalculate-overdue) error for ${gauge.gauge_key}:`, err),
+      );
+
+      results.updated++;
+    }
+
+    console.log(
+      `[recalculate-overdue] checked: ${results.checked}, updated: ${results.updated}, skipped: ${results.skipped}`,
+    );
+    return res.json(results);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 
 // get all gauges
@@ -131,8 +231,8 @@ router.patch('/:gaugeKey', async (req, res) => {
     // If schedule_table was updated, recompute batch_keys, gaugeDates, status and sync
     if (patch.schedule_table) {
       const batchKeys = computeBatchKeys(updatedGauge.schedule_table);
-      const gaugeDates = computeGaugeDates(updatedGauge.schedule_table);
-      const gaugeStatus = computeGaugeStatus(updatedGauge.schedule_table);
+      const gaugeDates = computeGaugeDates(updatedGauge.schedule_table, batchKeys);
+      const gaugeStatus = computeGaugeStatus(updatedGauge.schedule_table, batchKeys);
 
       updatedGauge = await Gauge.findOneAndUpdate(
         { gauge_key: gaugeKey },
@@ -168,52 +268,56 @@ router.post('/:gaugeKey/schedule', async (req, res) => {
     if (!gaugeKey) {
       return res.status(400).json({ message: 'gaugeKey path param is required.' });
     }
-
+ 
     const gauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
     if (!gauge) {
       return res.status(404).json({ message: 'Gauge not found.' });
     }
-
+ 
     const rows = Array.isArray(gauge.schedule_table) ? gauge.schedule_table : [];
     const frequency = Number(gauge.frequency) || 0;
-
+ 
     if (frequency <= 0) {
       return res.status(400).json({ message: 'Gauge frequency must be > 0 to append a schedule row.' });
     }
-
-    // Compute next due_date from the last row
-    let nextDueDate;
-    if (rows.length > 0) {
+ 
+    // ── NEW: use client-supplied due_date when provided ──────────────────────
+    // The frontend always knows the correct next date (it may have shifted dates
+    // in memory that haven't been persisted to the DB yet), so trust it.
+    let nextDueDate = null;
+    if (req.body?.due_date) {
+      nextDueDate = parseDateValue(req.body.due_date);
+    }
+    if (!nextDueDate && rows.length > 0) {
       const lastDue = new Date(rows[rows.length - 1].due_date);
       lastDue.setMonth(lastDue.getMonth() + frequency);
       nextDueDate = lastDue;
     } else {
       nextDueDate = new Date();
     }
-
+    // ────────────────────────────────────────────────────────────────────────
+ 
     const nextId = rows.length > 0
       ? Math.max(...rows.map((r) => Number(r.schedule_id) || 0)) + 1
       : 1;
-
+ 
     const newRow = {
       schedule_id: nextId,
       due_date: nextDueDate,
       completion_date: null,
       status: 'not-started',
     };
-
-    // Push the new row first
+ 
     const afterPush = await Gauge.findOneAndUpdate(
       { gauge_key: gaugeKey },
       { $push: { schedule_table: newRow } },
       { returnDocument: 'after', runValidators: true },
     ).lean();
-
-    // Recompute batch_keys, root dates and status from the full updated schedule
+ 
     const batchKeys = computeBatchKeys(afterPush.schedule_table);
-    const gaugeDates = computeGaugeDates(afterPush.schedule_table);
-    const gaugeStatus = computeGaugeStatus(afterPush.schedule_table);
-    const updated = await Gauge.findOneAndUpdate(
+    const gaugeDates = computeGaugeDates(afterPush.schedule_table, batchKeys);
+    const gaugeStatus = computeGaugeStatus(afterPush.schedule_table, batchKeys);
+    await Gauge.findOneAndUpdate(
       { gauge_key: gaugeKey },
       {
         $set: {
@@ -221,17 +325,15 @@ router.post('/:gaugeKey/schedule', async (req, res) => {
           due_date: gaugeDates.due_date,
           last_completion_date: gaugeDates.last_completion_date,
           status: gaugeStatus,
-        }
+        },
       },
       { returnDocument: 'after' },
     ).lean();
-
-    // Sync current_batches / previous_batches based on what changed
+ 
     syncBatchCollections(gaugeKey, gauge.batch_keys, batchKeys).catch((err) =>
       console.error('syncBatchCollections (POST schedule) error:', err),
     );
-
-    // Trigger fast ML recalculation for the specific gauge (includes batch risk updates)
+ 
     try {
       await fetch(`http://127.0.0.1:8000/api/risk/gauge/${encodeURIComponent(gaugeKey)}/run`, {
         method: 'POST',
@@ -239,7 +341,7 @@ router.post('/:gaugeKey/schedule', async (req, res) => {
     } catch (err) {
       console.error(`Failed to trigger ML risk recalculation for ${gaugeKey}:`, err);
     }
-
+ 
     const finalGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
     return res.status(201).json(finalGauge);
   } catch (error) {
@@ -305,8 +407,8 @@ router.patch('/:gaugeKey/schedule/:scheduleId', async (req, res) => {
 
     // Recompute the full batch_keys map, root dates and status from the updated schedule
     const batchKeys = computeBatchKeys(afterUpdate.schedule_table);
-    const gaugeDates = computeGaugeDates(afterUpdate.schedule_table);
-    const gaugeStatus = computeGaugeStatus(afterUpdate.schedule_table);
+    const gaugeDates = computeGaugeDates(afterUpdate.schedule_table, batchKeys);
+    const gaugeStatus = computeGaugeStatus(afterUpdate.schedule_table, batchKeys);
     const updated = await Gauge.findOneAndUpdate(
       { gauge_key: gaugeKey },
       {
@@ -333,6 +435,69 @@ router.patch('/:gaugeKey/schedule/:scheduleId', async (req, res) => {
     } catch (err) {
       console.error(`Failed to trigger ML risk recalculation for ${gaugeKey}:`, err);
     }
+
+    const finalGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    return res.json(finalGauge);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// bulk update schedule rows
+router.patch('/:gaugeKey/schedule-bulk', async (req, res) => {
+  try {
+    const gaugeKey = decodeURIComponent(String(req.params.gaugeKey || '').trim());
+    if (!gaugeKey) return res.status(400).json({ message: 'gaugeKey path param is required.' });
+
+    const updates = Array.isArray(req.body.updates) ? req.body.updates : [];
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'updates array is required.' });
+    }
+
+    const existingGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
+    if (!existingGauge) return res.status(404).json({ message: 'Gauge not found.' });
+
+    let bulkSchedule = existingGauge.schedule_table || [];
+
+    for (const update of updates) {
+      const { scheduleId, due_date, status, completion_date } = update;
+      const rowIdx = bulkSchedule.findIndex((r) => Number(r.schedule_id) === Number(scheduleId));
+      if (rowIdx === -1) continue;
+      
+      if (status) bulkSchedule[rowIdx].status = normalizeScheduleStatus(status);
+      if (completion_date !== undefined) bulkSchedule[rowIdx].completion_date = parseDateValue(completion_date);
+      if (due_date !== undefined) bulkSchedule[rowIdx].due_date = parseDateValue(due_date);
+    }
+
+    const afterUpdate = await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      { $set: { schedule_table: bulkSchedule } },
+      { returnDocument: 'after', runValidators: true },
+    ).lean();
+
+    const batchKeys = computeBatchKeys(afterUpdate.schedule_table);
+    const gaugeDates = computeGaugeDates(afterUpdate.schedule_table, batchKeys);
+    const gaugeStatus = computeGaugeStatus(afterUpdate.schedule_table, batchKeys);
+
+    await Gauge.findOneAndUpdate(
+      { gauge_key: gaugeKey },
+      {
+        $set: {
+          batch_keys: batchKeys,
+          due_date: gaugeDates.due_date,
+          last_completion_date: gaugeDates.last_completion_date,
+          status: gaugeStatus,
+        }
+      }
+    );
+
+    syncBatchCollections(gaugeKey, existingGauge.batch_keys, batchKeys).catch((err) =>
+      console.error('syncBatchCollections (PATCH schedule-bulk) error:', err),
+    );
+
+    try {
+      await fetch(`http://127.0.0.1:8000/api/risk/gauge/${encodeURIComponent(gaugeKey)}/run`, { method: 'POST' });
+    } catch (err) {}
 
     const finalGauge = await Gauge.findOne({ gauge_key: gaugeKey }).lean();
     return res.json(finalGauge);

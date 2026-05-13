@@ -7,26 +7,28 @@ from app.db.repositories.gauge import ( add_latest_prediction, add_ml_features, 
 from app.db.repositories.current_batches import update_current_batch_risk
 from app.db.repositories.previous_batches import update_previous_batch_risk
 from app.db.repositories.batches import update_unified_batch_risk
-from app.db.mongo_client import get_db
+from app.db.mongo_client import get_db, gauge_lookup_filter
 from app.ml.classifier import build_risk_payload
 
 def update_single_gauge_prediction(gauge_key: str, *, update_batches: bool = True) -> dict[str, Any]:
     today = datetime.utcnow()
     db = get_db()
-    gauge = db["gauges"].find_one({"gauge_key": gauge_key}, {"_id": 0})
+    normalized_key = str(gauge_key or "").strip()
+    gauge = db["gauges"].find_one(gauge_lookup_filter(normalized_key), {"_id": 0})
     if not gauge:
-        raise ValueError(f"Gauge {gauge_key} not found")
+        raise ValueError(f"Gauge {normalized_key} not found")
 
+    resolved_key = str(gauge.get("gauge_key") or gauge.get("gauge_id") or normalized_key).strip()
     payload = build_risk_payload(gauge, today=today)
-    add_ml_features(gauge_key, payload["ml_features"])
-    add_latest_prediction(gauge_key, payload["latest_prediction"])
+    add_ml_features(resolved_key, payload["ml_features"])
+    add_latest_prediction(resolved_key, payload["latest_prediction"])
 
     if update_batches:
         update_current_batch_risk()
         update_previous_batch_risk()
         update_unified_batch_risk()
 
-    return {"gauge_key": gauge_key, "updated": True}
+    return {"gauge_key": resolved_key, "updated": True}
 
 
 def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, Any]:

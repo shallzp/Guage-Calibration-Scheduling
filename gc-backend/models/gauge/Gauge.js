@@ -54,6 +54,7 @@ const GaugeSchema = new mongoose.Schema(
       next_due_date: { type: Date, default: null },
       max_delay_days: Number,
       history_size: Number,
+      predicted_overrun: Number,
     },
     latest_prediction: {
       // can be removed or anything more can be added
