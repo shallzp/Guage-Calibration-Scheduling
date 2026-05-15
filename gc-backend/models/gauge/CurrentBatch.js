@@ -11,6 +11,12 @@ const CurrentBatchSchema = new mongoose.Schema(
       medium: { type: Number, default: 0 },
       low: { type: Number, default: 0 },
     },
+    guage_summary: {
+      in_progress: { type: Number, default: 0 },
+      not_started: { type: Number, default: 0 },
+      completed: { type: Number, default: 0 },
+      overdue: { type: Number, default: 0 },
+    },
     batch_risk: { type: Number, default: 0 },
     generated_at: { type: Date, default: Date.now },
   },

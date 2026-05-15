@@ -1,24 +1,50 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
+import { toGaugeModelFromApi } from './utils/gauge/gaugeDataUtils'
+import { apiFetch, mlFetch } from './utils/api'
+
 import Navbar from './components/Navbar'
+
 import CampaignDashboard from './pages/CampaignDashboard'
 import GaugeDashboard from './pages/GaugeDashboard'
 import ScheduleCalibration from './pages/ScheduleCalibration'
-import { toGaugeModelFromApi } from './utils/gaugeData'
-import { apiFetch, mlFetch } from './utils/api'
 
 function App() {
   const [gaugeRecords, setGaugeRecords] = useState([])
+  const [rawGaugeRecords, setRawGaugeRecords] = useState([])  // raw API format for BatchDetailPanel
+  const [batchRecords, setBatchRecords] = useState([])
   const [isLoadingGauges, setIsLoadingGauges] = useState(true)
+  const [isRefreshingGauges, setIsRefreshingGauges] = useState(false)
+  const gaugeHasLoaded = useRef(false)  // true after first successful load
   const [gaugeLoadError, setGaugeLoadError] = useState(false)
   const [campaignData, setCampaignData] = useState([])
   const [partsDispatchData, setPartsDispatchData] = useState([])
   const [isLoadingCampaign, setIsLoadingCampaign] = useState(true)
   const [campaignLoadError, setCampaignLoadError] = useState(false)
 
+  const loadBatches = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/batches/current')
+      if (response.ok) {
+        const data = await response.json()
+        setBatchRecords(Array.isArray(data) ? data : [])
+      }
+    } catch (error) {
+      console.error('Failed to load batches:', error)
+      if (!gaugeHasLoaded.current) {
+        setBatchRecords([])
+      }
+    }
+  }, [])
+
   const loadGauges = useCallback(async () => {
-    setIsLoadingGauges(true)
+    // First load → show skeleton. Subsequent refreshes → silent background update.
+    if (!gaugeHasLoaded.current) {
+      setIsLoadingGauges(true)
+    } else {
+      setIsRefreshingGauges(true)
+    }
     try {
       const response = await apiFetch('/api/gauges')
       if (!response.ok) throw new Error('Failed to fetch gauges')
@@ -26,12 +52,19 @@ function App() {
 
       const models = Array.isArray(data) ? data.map(toGaugeModelFromApi) : []
       setGaugeRecords(models)
+      setRawGaugeRecords(Array.isArray(data) ? data : [])
       setGaugeLoadError(false)
+      gaugeHasLoaded.current = true
     } catch (error) {
-      setGaugeRecords([])
-      setGaugeLoadError(true)
+      if (!gaugeHasLoaded.current) {
+        // Only wipe data on initial load failure; keep stale data on refresh failure
+        setGaugeRecords([])
+        setRawGaugeRecords([])
+        setGaugeLoadError(true)
+      }
     } finally {
       setIsLoadingGauges(false)
+      setIsRefreshingGauges(false)
     }
   }, [])
 
@@ -125,8 +158,9 @@ function App() {
       // Step 4 — Run risk scoring now that models are fresh (or best available)
       await mlFetch('/api/risk/run', { method: 'POST' })
 
-      // Step 5 — Reload gauges silently to show updated risk scores
+      // Step 5 — Reload gauges and batches silently to show updated risk scores
       loadGauges()
+      loadBatches()
 
       console.log('[ML Pipeline] Completed: overdue recalculation → training → risk scoring → gauge reload.')
     } catch (err) {
@@ -137,11 +171,12 @@ function App() {
   useEffect(() => {
     // UI data loads immediately (parallel, not blocked by ML pipeline)
     loadGauges()
+    loadBatches()
     loadCampaignData()
 
     // ML pipeline runs entirely in background
     runMlPipeline()
-  }, [loadGauges, loadCampaignData, runMlPipeline])
+  }, [loadGauges, loadBatches, loadCampaignData, runMlPipeline])
 
   return (
     <div className="min-h-screen md:flex">
@@ -155,9 +190,15 @@ function App() {
               element={
                 <GaugeDashboard
                   gauges={gaugeRecords}
+                  batches={batchRecords}
+                  allGauges={rawGaugeRecords}
                   isLoading={isLoadingGauges}
+                  isRefreshing={isRefreshingGauges}
                   hasError={gaugeLoadError}
-                  onRefreshGauges={loadGauges}
+                  onRefreshGauges={() => {
+                    loadGauges()
+                    loadBatches()
+                  }}
                 />
               }
             />
@@ -167,7 +208,10 @@ function App() {
                 <ScheduleCalibration
                   gauges={gaugeRecords}
                   setGauges={setGaugeRecords}
-                  onRefreshGauges={loadGauges}
+                  onRefreshGauges={() => {
+                    loadGauges()
+                    loadBatches()
+                  }}
                 />
               }
             />

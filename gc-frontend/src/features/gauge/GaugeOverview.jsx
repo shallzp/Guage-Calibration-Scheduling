@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { STATUS } from '../../utils/gaugeData'
+import { STATUS } from '../../utils/gauge/gaugeDataUtils'
 import { apiFetch } from '../../utils/api'
 
 function GaugeOverviewSkeleton() {

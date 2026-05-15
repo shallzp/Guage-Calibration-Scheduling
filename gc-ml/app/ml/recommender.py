@@ -235,7 +235,7 @@ def _get_batch_loads(candidate_dates: list) -> dict:
     batch_ids = [f"BATCH-{d.strftime('%Y%m%d')}" for d in candidate_dates]
     db = get_db()
     batches = list(db["current_batches"].find(
-        {"_id": {"": batch_ids}},
+        {"_id": {"$in": batch_ids}},
         {"_id": 1, "gauge_count": 1},
     ))
     load_map = {b["_id"]: b.get("gauge_count", 0) for b in batches}

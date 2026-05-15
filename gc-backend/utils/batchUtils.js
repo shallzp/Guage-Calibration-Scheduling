@@ -1,4 +1,4 @@
-﻿const CurrentBatch = require('../models/gauge/CurrentBatch');
+const CurrentBatch = require('../models/gauge/CurrentBatch');
 const PreviousBatch = require('../models/gauge/PreviousBatch');
 const Batch = require('../models/gauge/Batch');
 const Gauge = require('../models/gauge/Gauge');
@@ -279,6 +279,7 @@ async function upsertCurrentBatch(batchKey, batchDate, gaugeKey) {
   await CurrentBatch.findByIdAndUpdate(batchKey, [
     { $set: { gauge_count: { $size: '$gauge_keys' } } },
   ], { updatePipeline: true });
+  await refreshCurrentBatchSummary(batchKey);
 }
 
 // Remove a gauge from `current_batches`. Deletes the document when empty.
@@ -296,6 +297,35 @@ async function removeCurrentBatch(batchKey, gaugeKey) {
   await CurrentBatch.findByIdAndUpdate(batchKey, [
     { $set: { gauge_count: { $size: '$gauge_keys' } } },
   ], { updatePipeline: true });
+  await refreshCurrentBatchSummary(batchKey);
+}
+
+/**
+ * Recomputes guage_summary for a current_batch by aggregating the live `status`
+ * field of all gauge documents whose gauge_key is in the batch.
+ * Status values from Gauge collection are expected to be e.g. 'In Progress',
+ * 'Not Started', 'Completed', 'Overdue' (case-insensitive).
+ */
+async function refreshCurrentBatchSummary(batchKey) {
+  const batch = await CurrentBatch.findById(batchKey).lean();
+  if (!batch || !Array.isArray(batch.gauge_keys) || batch.gauge_keys.length === 0) return;
+
+  const gauges = await Gauge.find(
+    { gauge_key: { $in: batch.gauge_keys } },
+    { status: 1, _id: 0 },
+  ).lean();
+
+  const summary = { in_progress: 0, not_started: 0, completed: 0, overdue: 0 };
+  for (const g of gauges) {
+    const s = String(g.status || '').toLowerCase().replace(/\s+/g, '_');
+    if      (s === 'in_progress')  summary.in_progress++;
+    else if (s === 'not_started')  summary.not_started++;
+    else if (s === 'completed')    summary.completed++;
+    else if (s === 'overdue')      summary.overdue++;
+    else                           summary.not_started++;  // fallback
+  }
+
+  await CurrentBatch.findByIdAndUpdate(batchKey, { $set: { guage_summary: summary } });
 }
 
 /**

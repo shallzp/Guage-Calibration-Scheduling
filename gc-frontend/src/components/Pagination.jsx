@@ -1,9 +1,4 @@
-export default function Pagination({
-    currentPage,
-    totalPages,
-    filteredCount,
-    onPageChange,
-}) {
+export default function Pagination({ currentPage, totalPages, filteredCount, onPageChange }) {
     const startIndex = filteredCount === 0 ? 0 : (currentPage - 1) * 10 + 1
     const endIndex = filteredCount === 0 ? 0 : Math.min(currentPage * 10, filteredCount)
 

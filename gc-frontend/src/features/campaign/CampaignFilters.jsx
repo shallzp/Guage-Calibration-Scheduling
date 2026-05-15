@@ -1,5 +1,6 @@
-import FilterSelect from '../../components/FilterSelect'
 import { CircleCheck, MapPin, Building2, Building, Factory, Megaphone, FileText, Hash, CalendarDays, Calendar } from 'lucide-react'
+
+import FilterSelect from '../../components/FilterSelect'
 
 const FILTER_FIELDS = [
     { key: 'campaignStatus', ariaLabel: 'Filter by campaign status', icon: CircleCheck },

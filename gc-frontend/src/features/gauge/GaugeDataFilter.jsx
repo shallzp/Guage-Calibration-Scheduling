@@ -1,5 +1,6 @@
-import FilterSelect from '../../components/FilterSelect'
 import { Search, MapPin, Timer, Activity, AlertTriangle } from 'lucide-react'
+
+import FilterSelect from '../../components/FilterSelect'
 
 const FILTER_FIELD_CONFIG = {
   location: { key: 'location', ariaLabel: 'Filter by location', icon: MapPin },

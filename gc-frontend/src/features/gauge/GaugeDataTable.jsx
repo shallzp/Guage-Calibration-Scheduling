@@ -3,9 +3,12 @@ import { useSearchParams } from 'react-router-dom'
 import { CalendarDays } from 'lucide-react'
 
 import SortableHeader from '../../components/SortableHeader'
-import GaugeDataFilter, { GaugeFiltersSkeleton } from './GaugeDataFilter'
 import Pagination from '../../components/Pagination'
 import TableSkeleton from '../../components/TableSkeleton'
+
+import GaugeDataFilter, { GaugeFiltersSkeleton } from './GaugeDataFilter'
+
+import { riskBadgeStyle, statusBadgeStyle } from '../../utils/gauge/badgeStyles'
 
 const PAGE_SIZE = 10
 
@@ -20,15 +23,8 @@ export function GaugeDataTableSkeleton() {
   )
 }
 
-const STATUS_BADGE_STYLES = {
-  'Completed':   'bg-emerald-100 text-emerald-700 border-emerald-200',
-  'In Progress': 'bg-blue-100   text-blue-700   border-blue-200',
-  'Overdue':     'bg-rose-100   text-rose-700   border-rose-200',
-  'Not Started': 'bg-slate-100  text-slate-600  border-slate-200',
-}
-
 function StatusBadge({ status }) {
-  const style = STATUS_BADGE_STYLES[status]
+  const style = statusBadgeStyle(status)
   if (!style) return <span className="text-slate-400">—</span>
   return (
     <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold ${style}`}>
@@ -37,15 +33,9 @@ function StatusBadge({ status }) {
   )
 }
 
-const RISK_BADGE_STYLES = {
-  high: 'bg-rose-100 text-rose-700 border-rose-200',
-  medium: 'bg-amber-100 text-amber-700 border-amber-200',
-  low: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-}
-
 function RiskBadge({ level }) {
   const normalized = String(level || '').trim().toLowerCase()
-  const style = RISK_BADGE_STYLES[normalized]
+  const style = riskBadgeStyle(normalized)
   if (!style) return <span className="text-slate-400">—</span>
   return (
     <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold capitalize ${style}`}>

@@ -167,12 +167,22 @@ function buildBatchSeedData(gauges) {
             gauge_keys:   [],
             gauge_count:  0,
             risk_summary: { high: 0, medium: 0, low: 0 },
+            guage_summary: { in_progress: 0, not_started: 0, completed: 0, overdue: 0 },
             batch_risk:   0,
             generated_at: new Date(),
           };
         }
         currentMap[key].gauge_keys.push(gauge.gauge_key);
         currentMap[key].gauge_count++;
+
+        // Tally gauge_summary from the matching schedule row's status
+        const matchRow = scheduleRows.find((row) => sameDayUtc(row.due_date, batchDate));
+        const rowStatus = String(matchRow?.status || '').toLowerCase().replace(/[^a-z]/g, '_');
+        if      (rowStatus === 'in_progress')  currentMap[key].guage_summary.in_progress++;
+        else if (rowStatus === 'not_started')  currentMap[key].guage_summary.not_started++;
+        else if (rowStatus === 'completed')    currentMap[key].guage_summary.completed++;
+        else if (rowStatus === 'overdue')      currentMap[key].guage_summary.overdue++;
+        else                                   currentMap[key].guage_summary.not_started++; // default
       }
 
       // ── previous_batches ──────────────────────────────────────────────────

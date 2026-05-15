@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { NavLink, useParams, useSearchParams } from 'react-router-dom'
 
-import { normalizeCampaignRow, toSelectOptions, buildCampaignOverviewRows, buildSummaryRows } from '../utils/campaignData'
+import { normalizeCampaignRow, toSelectOptions, buildCampaignOverviewRows, buildSummaryRows } from '../utils/campaign/campaignDataUtils'
 
 import CampaignFilters, { CampaignFiltersSkeleton } from '../features/campaign/CampaignFilters'
 import SummaryTable, { SummaryTableSkeleton } from '../features/campaign/SummaryTable'

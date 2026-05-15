@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 
+import { applySLAConfigToGauges, processSLAEmails } from '../utils/gauge/slaUtils'
+import { apiFetch } from '../utils/api'
+
+import DialogBox from '../components/DialogBox'
+
 import GaugeDataTable, { GaugeDataTableSkeleton } from '../features/gauge/GaugeDataTable'
 import GaugeOverview, { GaugeOverviewSkeleton } from '../features/gauge/GaugeOverview'
 import GaugeRecommendations, { GaugeRecommendationsSkeleton } from '../features/gauge/GaugeRecommendations'
 import GaugeBatches, { GaugeBatchesSkeleton } from '../features/gauge/GaugeBatches'
-import DialogBox from '../components/DialogBox'
 import SLAConfigModal from '../features/gauge/SLAConfigModal'
-
-import { applySLAConfigToGauges, processSLAEmails } from '../utils/slaUtils'
-import { apiFetch } from '../utils/api'
 
 const DEFAULT_FILTERS = {
   query: '',
@@ -32,7 +33,7 @@ const VALID_TAB_IDS = new Set(TAB_CONFIG.map((t) => t.id))
 const DEFAULT_TAB = 'gauge-overview'
 
 
-function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
+function GaugeDashboard({ gauges, batches = [], allGauges = [], isLoading, isRefreshing = false, hasError, onRefreshGauges }) {
   const navigate = useNavigate()
   const { tab } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -94,7 +95,9 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
   const [isLoadingSlaConfig, setIsLoadingSlaConfig] = useState(true)
   const [configModalOpen, setConfigModalOpen] = useState(false)
   const [slaSaveError, setSlaSaveError] = useState('')
-  const [batchCount, setBatchCount] = useState(0)
+
+  // Derive batch count directly from props — no separate fetch needed
+  const batchCount = batches.length
 
   const gaugesWithSla = useMemo(() => applySLAConfigToGauges(gauges, slaConfig), [gauges, slaConfig])
   const isGaugeViewLoading = isLoading || isLoadingSlaConfig
@@ -109,6 +112,24 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
         if (!response.ok) throw new Error('Failed to fetch SLA config')
         const data = await response.json()
         if (!isActive) return
+
+        // ── Stale anchor detection ─────────────────────────────────────────
+        // The SLA config document is deleted and re-created on every `npm run seed`.
+        // Its MongoDB _id therefore changes with each seed.
+        // If the stored id doesn't match the live one, localStorage may contain
+        // stale shiftBase: anchors from a pre-seed session — clear them all.
+        const SEED_ID_KEY = 'gc_sla_config_id'
+        const storedSeedId = localStorage.getItem(SEED_ID_KEY)
+        const liveSeedId   = String(data._id || '')
+        if (liveSeedId && storedSeedId !== liveSeedId) {
+          // Wipe every shiftBase:* anchor that was saved before the reseed
+          Object.keys(localStorage)
+            .filter((k) => k.startsWith('shiftBase:'))
+            .forEach((k) => localStorage.removeItem(k))
+          localStorage.setItem(SEED_ID_KEY, liveSeedId)
+        }
+        // ──────────────────────────────────────────────────────────────────
+
         setSlaConfig({
           reminderNotStartedHours: Number(data.reminderNotStartedHours),
           reminderOverdueIntervalHours: Number(data.reminderOverdueIntervalHours),
@@ -129,23 +150,6 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
     return () => {
       isActive = false
     }
-  }, [])
-
-  useEffect(() => {
-    let isActive = true
-    apiFetch('/api/batches/current')
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to fetch batches')
-        return res.json()
-      })
-      .then((data) => {
-        if (isActive && Array.isArray(data)) {
-          setBatchCount(data.length)
-        }
-      })
-      .catch((err) => console.error('Error fetching batch count:', err))
-      
-    return () => { isActive = false }
   }, [])
 
   const filterOptions = useMemo(() => {
@@ -334,10 +338,10 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
               <button
                 type="button"
                 onClick={onRefreshGauges}
-                disabled={isGaugeViewLoading}
+                disabled={isGaugeViewLoading || isRefreshing}
                 className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <RefreshCw className={`h-4 w-4 ${isGaugeViewLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
+                <RefreshCw className={`h-4 w-4 ${isGaugeViewLoading || isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
                 Refresh Data
               </button>
               <button
@@ -383,7 +387,7 @@ function GaugeDashboard({ gauges, isLoading, hasError, onRefreshGauges }) {
             (isGaugeViewLoading || hasGaugeViewError ? (
               <GaugeBatchesSkeleton />
             ) : (
-              <GaugeBatches gauges={gaugesWithSla} />
+              <GaugeBatches batches={batches} allGauges={allGauges} />
             ))}
 
           {activeTab === 'gauge-data' &&

@@ -281,7 +281,7 @@ router.post('/:gaugeKey/schedule', async (req, res) => {
       return res.status(400).json({ message: 'Gauge frequency must be > 0 to append a schedule row.' });
     }
  
-    // ── NEW: use client-supplied due_date when provided ──────────────────────
+    // ── use client-supplied due_date when provided ───────────────────────────
     // The frontend always knows the correct next date (it may have shifted dates
     // in memory that haven't been persisted to the DB yet), so trust it.
     let nextDueDate = null;
@@ -289,11 +289,13 @@ router.post('/:gaugeKey/schedule', async (req, res) => {
       nextDueDate = parseDateValue(req.body.due_date);
     }
     if (!nextDueDate && rows.length > 0) {
+      // Fallback: derive from the last existing row + frequency
       const lastDue = new Date(rows[rows.length - 1].due_date);
       lastDue.setMonth(lastDue.getMonth() + frequency);
       nextDueDate = lastDue;
-    } else {
-      nextDueDate = new Date();
+    }
+    if (!nextDueDate) {
+      return res.status(400).json({ message: 'Could not determine a valid due_date. Please provide one.' });
     }
     // ────────────────────────────────────────────────────────────────────────
  

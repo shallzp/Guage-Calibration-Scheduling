@@ -1,16 +1,28 @@
-import { addHours, formatDateTime, parseDate } from './dateUtils'
-import { STATUS } from './gaugeData'
+import { addHours, formatDateTime, parseDate } from '../dateUtils'
+import { STATUS } from './gaugeDataUtils'
 
-/**
- * Normalises a due-date string to midnight (00:00) of that date.
- * All SLA hour offsets are computed from this anchor.
- */
+// Normalises a due-date string to midnight (00:00) of that date.
 function getDueDeadline(dueDateStr) {
     const d = parseDate(dueDateStr)
     if (!d) return null
     d.setHours(0, 0, 0, 0)
     return d
 }
+
+// Parses a "DD/MM/YYYY HH:MM AM/PM" string produced by formatDateTime.
+function parseDateTime(str) {
+    if (!str || str === '-') return null
+    const parts = str.split(' ')
+    if (parts.length < 3) return null
+    const [datePart, timePart, period] = parts
+    const [day, month, year] = datePart.split('/').map(Number)
+    let [hours, minutes] = timePart.split(':').map(Number)
+    if (!day || !month || !year) return null
+    if (period === 'PM' && hours !== 12) hours += 12
+    if (period === 'AM' && hours === 12) hours = 0
+    return new Date(year, month - 1, day, hours || 0, minutes || 0, 0, 0)
+}
+
 
 export function calculateReminderDate(dueDateStr, status, config = null) {
     if (!config) return '-'
@@ -209,18 +221,4 @@ export function applySLAConfigToGauges(gauges, config = null) {
             escalationDateTime: calculateEscalationDate(row.dueDate, row.status, rules),
         })),
     }))
-}
-
-// Parses a "DD/MM/YYYY HH:MM AM/PM" string produced by formatDateTime.
-function parseDateTime(str) {
-    if (!str || str === '-') return null
-    const parts = str.split(' ')
-    if (parts.length < 3) return null
-    const [datePart, timePart, period] = parts
-    const [day, month, year] = datePart.split('/').map(Number)
-    let [hours, minutes] = timePart.split(':').map(Number)
-    if (!day || !month || !year) return null
-    if (period === 'PM' && hours !== 12) hours += 12
-    if (period === 'AM' && hours === 12) hours = 0
-    return new Date(year, month - 1, day, hours || 0, minutes || 0, 0, 0)
 }

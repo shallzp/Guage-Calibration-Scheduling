@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { PanelRightOpen } from 'lucide-react'
-import { apiFetch } from '../../utils/api'
+
 import { formatDate } from '../../utils/dateUtils'
+import { riskBadgeStyle, riskCardStyle, statusBadgeStyle } from '../../utils/gauge/badgeStyles'
+
 import Pagination from '../../components/Pagination'
 import TableSkeleton from '../../components/TableSkeleton'
 import SortableHeader from '../../components/SortableHeader'
@@ -86,54 +88,40 @@ function RiskCountPills({ riskSummary = {} }) {
   const medium = riskSummary.medium ?? 0
   const low = riskSummary.low ?? 0
   if (high === 0 && medium === 0 && low === 0) return <span className="text-xs text-slate-400">—</span>
-
   return (
     <div className="flex flex-col items-start gap-1.5">
-      {high > 0 && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
-          High: {high}
-        </span>
-      )}
-      {medium > 0 && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-          Medium: {medium}
-        </span>
-      )}
-      {low > 0 && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-          Low: {low}
-        </span>
-      )}
+      {high > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${riskBadgeStyle('high')}`}>High: {high}</span>}
+      {medium > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${riskBadgeStyle('medium')}`}>Medium: {medium}</span>}
+      {low > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${riskBadgeStyle('low')}`}>Low: {low}</span>}
     </div>
   )
 }
 
-
-
+function GaugeSummaryPills({ gaugeSummary = {} }) {
+  const inProgress = gaugeSummary.in_progress ?? 0
+  const notStarted = gaugeSummary.not_started ?? 0
+  const completed  = gaugeSummary.completed   ?? 0
+  const overdue    = gaugeSummary.overdue     ?? 0
+  const total = inProgress + notStarted + completed + overdue
+  if (total === 0) return <span className="text-xs text-slate-400">—</span>
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      {inProgress > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeStyle('In Progress')}`}>In Progress: {inProgress}</span>}
+      {notStarted > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeStyle('Not Started')}`}>Not Started: {notStarted}</span>}
+      {completed > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeStyle('Completed')}`}>Completed: {completed}</span>}
+      {overdue > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeStyle('Overdue')}`}>Overdue: {overdue}</span>}
+    </div>
+  )
+}
 // Side panel — matches reference image exactly
-function BatchDetailPanel({ batch, onClose, onOpenRecommendation, onOpenSchedule }) {
-  const [gaugeDetails, setGaugeDetails] = useState([])
-  const [loadingGauges, setLoadingGauges] = useState(false)
+function BatchDetailPanel({ batch, allGauges, onClose, onOpenRecommendation, onOpenSchedule }) {
+  const gaugeDetails = useMemo(() => {
+    if (!batch) return []
+    const keySet = new Set(batch.gauge_keys || [])
+    return (allGauges || []).filter((g) => keySet.has(g.gauge_key))
+  }, [batch?._id, allGauges])
 
-  useEffect(() => {
-    if (!batch) return
-    let active = true
-    setLoadingGauges(true)
-    setGaugeDetails([])
-      ; (async () => {
-        try {
-          const res = await apiFetch('/api/gauges')
-          if (!res.ok) return
-          const data = await res.json()
-          if (!active) return
-          const keySet = new Set(batch.gauge_keys || [])
-          setGaugeDetails((data || []).filter((g) => keySet.has(g.gauge_key)))
-        } finally {
-          if (active) setLoadingGauges(false)
-        }
-      })()
-    return () => { active = false }
-  }, [batch?._id])
+  const loadingGauges = false  // data is always ready (pre-fetched by parent)
 
   if (!batch) return null
 
@@ -184,45 +172,40 @@ function BatchDetailPanel({ batch, onClose, onOpenRecommendation, onOpenSchedule
             .sort((a, b) => (Number(b.latest_prediction?.risk_score) || 0) - (Number(a.latest_prediction?.risk_score) || 0))
             .map((gauge) => {
             const riskLevel = String(gauge.latest_prediction?.risk_level || '').toLowerCase()
-            const riskCardStyle =
-              riskLevel === 'high'
-                ? 'border-rose-200 bg-rose-50/40 hover:border-rose-300 hover:bg-rose-50/60'
-                : riskLevel === 'medium'
-                  ? 'border-amber-200 bg-amber-50/40 hover:border-amber-300 hover:bg-amber-50/60'
-                  : 'border-emerald-200 bg-emerald-50/40 hover:border-emerald-300 hover:bg-emerald-50/60'
-            const riskBadgeStyle =
-              riskLevel === 'high'
-                ? 'bg-rose-100 text-rose-700 border-rose-200'
-                : riskLevel === 'medium'
-                  ? 'bg-amber-100 text-amber-700 border-amber-200'
-                  : 'bg-emerald-100 text-emerald-700 border-emerald-200'
-            const riskLabel = riskLevel ? riskLevel.toUpperCase() : 'UNKNOWN'
+            const hasRisk = riskLevel === 'high' || riskLevel === 'medium' || riskLevel === 'low'
+            const cardStyle = riskCardStyle(riskLevel)
+            const badgeStyle = riskBadgeStyle(riskLevel)
+            const riskLabel = riskLevel.toUpperCase()
             const rawAction = String(gauge.latest_prediction?.action || '').trim()
             const normalizedAction = rawAction.toLowerCase()
             const showAction = normalizedAction && normalizedAction !== 'no_change' && normalizedAction !== 'no_chnage'
             const formatActionLabel = (value) =>
-              value
-                .replace(/_/g, ' ')
-                .toLowerCase()
-                .replace(/\b\w/g, (char) => char.toUpperCase())
-
+              value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
             const actionLabel = rawAction ? formatActionLabel(rawAction) : 'Recommended Action'
-
             const parts = String(gauge.gauge_key || '').split('::')
             const gaugeCode = parts.length > 1 ? parts[parts.length - 1] : gauge.gauge_key
-
             const showRecommendation = riskLevel === 'high' || riskLevel === 'medium'
+            const gaugeStatus = String(gauge.status || '').trim()
+            const sbStyle = statusBadgeStyle(gaugeStatus)
 
             return (
               <div
                 key={gauge.gauge_key}
-                className={`relative w-full rounded-xl border p-4 text-left shadow-sm transition ${riskCardStyle}`}
+                className={`relative w-full rounded-xl border p-4 text-left shadow-sm transition ${cardStyle}`}
               >
-                <span
-                  className={`absolute right-3 top-3 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${riskBadgeStyle}`}
-                >
-                  {riskLabel}
-                </span>
+                {/* Top-right: status pill + risk pill side by side */}
+                <div className="absolute right-3 top-3 flex items-center gap-1.5">
+                  {gaugeStatus && sbStyle && (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sbStyle}`}>
+                      {gaugeStatus}
+                    </span>
+                  )}
+                  {hasRisk && badgeStyle && (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badgeStyle}`}>
+                      {riskLabel}
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-bold uppercase tracking-wide text-slate-900 leading-snug">
@@ -264,13 +247,10 @@ function BatchDetailPanel({ batch, onClose, onOpenRecommendation, onOpenSchedule
 }
 
 // Main component
-function GaugeBatches() {
+function GaugeBatches({ batches = [], allGauges = [] }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [batches, setBatches] = useState([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [fetchError, setFetchError] = useState('')
-  const [selectedBatch, setSelectedBatch] = useState(null)
   const pageParam = parseInt(searchParams.get('page') || '1', 10)
   const currentPage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam
 
@@ -283,20 +263,10 @@ function GaugeBatches() {
     }
     setSearchParams(next, { replace: true })
   }
-  const [filterRisk, setFilterRisk] = useState('all')
-  const [sortField, setSortField] = useState(null)
-  const [sortDirection, setSortDirection] = useState('asc')
+  const [filterRisk, setFilterRisk] = useState(() => searchParams.get('risk') || 'all')
+  const [sortField, setSortField] = useState(() => searchParams.get('sort') || null)
+  const [sortDirection, setSortDirection] = useState(() => searchParams.get('dir') === 'desc' ? 'desc' : 'asc')
   const PAGE_SIZE = 10
-
-  useEffect(() => {
-    const nextFilter = searchParams.get('risk') || 'all'
-    setFilterRisk((prev) => (prev === nextFilter ? prev : nextFilter))
-
-    const nextSortField = searchParams.get('sort') || null
-    const nextSortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc'
-    setSortField((prev) => (prev === nextSortField ? prev : nextSortField))
-    setSortDirection((prev) => (prev === nextSortDir ? prev : nextSortDir))
-  }, [searchParams])
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams)
@@ -316,30 +286,30 @@ function GaugeBatches() {
     }
   }, [filterRisk, sortDirection, sortField, searchParams, setSearchParams])
 
-  useEffect(() => {
-    let isActive = true; 
-    (async () => {
-        setIsLoading(true)
-        setFetchError('')
-        try {
-          const response = await apiFetch('/api/batches/current')
-          if (!response.ok) {
-            const text = await response.text()
-            throw new Error(text || `Failed to fetch batches (${response.status})`)
-          }
-          const data = await response.json()
-          if (!isActive) return
-          setBatches(Array.isArray(data) ? data : [])
-        } catch (error) {
-          if (!isActive) return
-          setFetchError(error?.message || 'Failed to fetch batches')
-        } finally {
-          if (!isActive) return
-          setIsLoading(false)
-        }
-      }) ()
-    return () => { isActive = false }
-  }, [])
+  // ── Drawer state is stored in the URL as ?drawer=<batchId> ──────────────
+  const drawerBatchId = searchParams.get('drawer') || null
+
+  const selectedBatch = useMemo(
+    () => (drawerBatchId ? batches.find((b) => b._id === drawerBatchId) ?? null : null),
+    [drawerBatchId, batches],
+  )
+
+  const openDrawer = (batch) => {
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params)
+      next.set('drawer', batch._id)
+      return next
+    }, { replace: true })
+  }
+
+  const closeDrawer = () => {
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params)
+      next.delete('drawer')
+      return next
+    }, { replace: true })
+  }
+  // ──────────────────────────────────────────────────────────────────────
 
   const filteredBatches = batches.filter(b => {
     if (filterRisk === 'high') return (b.batch_risk ?? 0) >= 0.7
@@ -393,20 +363,6 @@ function GaugeBatches() {
     }
   }
 
-  if (isLoading) return <GaugeBatchesSkeleton />
-
-  if (fetchError) {
-    return (
-      <section className="fade-in-up">
-        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-6 text-center">
-          <p className="text-sm font-semibold text-rose-700">Failed to load batch data</p>
-          <p className="mt-1 text-xs text-rose-600">{fetchError}</p>
-        </div>
-      </section>
-    )
-  }
-
-
 
   const totalPages = Math.max(1, Math.ceil(sortedBatches.length / PAGE_SIZE))
   const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages)
@@ -419,15 +375,29 @@ function GaugeBatches() {
   const handleOpenRecommendation = (gauge) => {
     const gaugeKey = gauge?.gauge_key || gauge?.key
     if (!gaugeKey) return
-    setSelectedBatch(null)
-    navigate(`/gauge-calibration/recommendations?gaugeKey=${encodeURIComponent(gaugeKey)}`)
+    
+    const cleanParams = new URLSearchParams(location.search)
+    cleanParams.delete('drawer')
+    const cleanSearch = cleanParams.toString() ? `?${cleanParams.toString()}` : ''
+
+    closeDrawer()
+    navigate(`/gauge-calibration/recommendations?gaugeKey=${encodeURIComponent(gaugeKey)}`, {
+      state: { from: location.pathname + cleanSearch },
+    })
   }
 
   const handleOpenSchedule = (gauge) => {
     const gaugeKey = gauge?.gauge_key || gauge?.key
     if (!gaugeKey) return
-    setSelectedBatch(null)
-    navigate(`/gauge-calibration/schedule/${encodeURIComponent(gaugeKey)}`)
+
+    const cleanParams = new URLSearchParams(location.search)
+    cleanParams.delete('drawer')
+    const cleanSearch = cleanParams.toString() ? `?${cleanParams.toString()}` : ''
+
+    closeDrawer()
+    navigate(`/gauge-calibration/schedule/${encodeURIComponent(gaugeKey)}`, {
+      state: { from: location.pathname + cleanSearch },
+    })
   }
 
   return (
@@ -480,6 +450,7 @@ function GaugeBatches() {
               <tr>
                 <SortableHeader label="Batch Date" field="batchDate" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                 <SortableHeader label="Batch Size" field="gauge_count" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+                <th className="px-4 py-3">Gauge Status</th>
                 <th className="px-4 py-3">Risk Counts</th>
                 <SortableHeader label="Batch Risk" field="batch_risk" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
 
@@ -491,13 +462,14 @@ function GaugeBatches() {
                 <tr key={batch._id} className="border-t border-slate-200/80 text-slate-700 hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3 font-medium text-slate-900">{formatBatchDate(batch)}</td>
                   <td className="px-4 py-3">{batch.gauge_count ?? 0}</td>
+                  <td className="px-4 py-3"><GaugeSummaryPills gaugeSummary={batch.guage_summary} /></td>
                   <td className="px-4 py-3"><RiskCountPills riskSummary={batch.risk_summary} /></td>
                   <td className="px-4 py-3"><RiskScoreBadge score={batch.batch_risk} /></td>
 
                   <td className="px-4 py-3 text-center">
                     <button
                       type="button"
-                      onClick={() => setSelectedBatch(batch)}
+                      onClick={() => openDrawer(batch)}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700"
                       aria-label={`View details for ${batch._id}`}
                       title="View details"
@@ -521,7 +493,8 @@ function GaugeBatches() {
 
       <BatchDetailPanel
         batch={selectedBatch}
-        onClose={() => setSelectedBatch(null)}
+        allGauges={allGauges}
+        onClose={closeDrawer}
         onOpenRecommendation={handleOpenRecommendation}
         onOpenSchedule={handleOpenSchedule}
       />

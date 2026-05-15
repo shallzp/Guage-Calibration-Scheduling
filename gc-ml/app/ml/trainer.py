@@ -233,7 +233,7 @@ def build_training_data() -> tuple[pd.DataFrame, pd.Series]:
 
 def train_risk_model() -> None:
     """Train Logistic Regression risk classifier — original logic, unchanged."""
-    print("\n── RISK MODEL (Logistic Regression) ──────────────────────────")
+    print("\n-- RISK MODEL (Logistic Regression) --------------------------")
     print("Extracting data from MongoDB...")
     X, y = build_training_data()
 
@@ -271,7 +271,7 @@ def train_risk_model() -> None:
     proba_high = model.predict_proba(X_scaled)[:, high_class_idx] * 100.0
     HIGH_CUTOFF   = float(np.percentile(proba_high, 60))
     MEDIUM_CUTOFF = float(np.percentile(proba_high, 30))
-    print(f"\nAuto-calibrated thresholds → HIGH >= {HIGH_CUTOFF:.1f}, MEDIUM >= {MEDIUM_CUTOFF:.1f}")
+    print(f"\nAuto-calibrated thresholds -> HIGH >= {HIGH_CUTOFF:.1f}, MEDIUM >= {MEDIUM_CUTOFF:.1f}")
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(model,           RISK_MODEL_PATH)
@@ -281,8 +281,8 @@ def train_risk_model() -> None:
         {"HIGH_RISK_CUTOFF": HIGH_CUTOFF, "MEDIUM_RISK_CUTOFF": MEDIUM_CUTOFF},
         RISK_METADATA_PATH,
     )
-    print(f"Risk model  → {RISK_MODEL_PATH}")
-    print(f"Risk scaler → {RISK_SCALER_PATH}")
+    print(f"Risk model  -> {RISK_MODEL_PATH}")
+    print(f"Risk scaler -> {RISK_SCALER_PATH}")
 
 
 # ============================================================================
@@ -340,7 +340,7 @@ def train_overrun_model(gauges: list[dict]) -> None:
     Train Ridge Regression to predict how many days a gauge will overrun.
     Trained on real delay_days from schedule history — no rule-generated labels.
     """
-    print("\n── OVERRUN MODEL (Ridge Regression) ──────────────────────────")
+    print("\n-- OVERRUN MODEL (Ridge Regression) --------------------------")
     X, y = _build_overrun_training_data(gauges)
 
     if len(X) == 0:
@@ -363,7 +363,7 @@ def train_overrun_model(gauges: list[dict]) -> None:
     joblib.dump(model,           OVERRUN_MODEL_PATH)
     joblib.dump(scaler,          OVERRUN_SCALER_PATH)
     joblib.dump(list(X.columns), OVERRUN_FEATURES_PATH)
-    print(f"Overrun model → {OVERRUN_MODEL_PATH}")
+    print(f"Overrun model -> {OVERRUN_MODEL_PATH}")
 
 
 # ============================================================================
@@ -468,7 +468,7 @@ def train_recommendation_model(gauges: list[dict]) -> None:
     Train RandomForest recommendation classifier.
     Must run after train_overrun_model() — depends on overrun model files.
     """
-    print("\n── RECOMMENDATION MODEL (RandomForest) ───────────────────────")
+    print("\n-- RECOMMENDATION MODEL (RandomForest) -----------------------")
 
     if not os.path.exists(OVERRUN_MODEL_PATH):
         print("Overrun model not found — skipping recommendation model.")
@@ -527,7 +527,7 @@ def train_recommendation_model(gauges: list[dict]) -> None:
         {"label_map": REC_LABEL_MAP, "feature_cols": REC_FEATURE_COLS},
         REC_METADATA_PATH,
     )
-    print(f"Recommendation model → {REC_MODEL_PATH}")
+    print(f"Recommendation model -> {REC_MODEL_PATH}")
 
 
 # ============================================================================

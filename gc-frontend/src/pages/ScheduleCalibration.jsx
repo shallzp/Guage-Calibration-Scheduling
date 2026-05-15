@@ -1,14 +1,14 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 
-import GaugeScheduleTable from '../features/gauge/GaugeScheduleTable'
-import DialogBox from '../components/DialogBox'
-import StakeholderModal from '../features/gauge/StakeholderModal'
-
 import { addMonthsClamped, formatDate, inputDateToDisplayDate, parseDate, toInputDate } from '../utils/dateUtils'
-
-import { STATUS, toGaugeModelFromApi } from '../utils/gaugeData'
+import { STATUS, toGaugeModelFromApi } from '../utils/gauge/gaugeDataUtils'
 import { apiFetch } from '../utils/api'
+
+import DialogBox from '../components/DialogBox'
+
+import GaugeScheduleTable from '../features/gauge/GaugeScheduleTable'
+import StakeholderModal from '../features/gauge/StakeholderModal'
 
 const initialDialogState = { isOpen: false, gaugeKey: '', rowIndex: null, completionDate: '', scheduledDate: '' }
 const initialFrequencyDialog = { isOpen: false, value: '' }
@@ -667,7 +667,7 @@ function ScheduleCalibration({ gauges, setGauges, onRefreshGauges }) {
                 onClick={handleBackToList}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
               >
-                Back To Data Table
+                Back To Dashboard
               </button>
               <button
                 type="button"
@@ -697,7 +697,7 @@ function ScheduleCalibration({ gauges, setGauges, onRefreshGauges }) {
               onClick={handleBackToList}
               className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800"
             >
-              Back To Data Table
+              Back To Dashboard
             </button>
           </div>
         )}

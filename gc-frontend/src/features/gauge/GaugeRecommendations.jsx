@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { PanelRightOpen } from 'lucide-react'
+
+import { addMonthsClamped, formatDate, parseDate } from '../../utils/dateUtils'
+import { apiFetch } from '../../utils/api'
+import { riskBadgeStyle, actionBadgeStyle } from '../../utils/gauge/badgeStyles'
 
 import TableSkeleton from '../../components/TableSkeleton'
 import Pagination from '../../components/Pagination'
 import Drawer from '../../components/Drawer'
-import GaugeDataFilter, { GaugeFiltersSkeleton } from './GaugeDataFilter'
-import { addMonthsClamped, formatDate, parseDate } from '../../utils/dateUtils'
-import { apiFetch } from '../../utils/api'
 import SortableHeader from '../../components/SortableHeader'
+
+import GaugeDataFilter, { GaugeFiltersSkeleton } from './GaugeDataFilter'
 
 export function GaugeRecommendationsSkeleton() {
   return (
@@ -21,11 +24,6 @@ export function GaugeRecommendationsSkeleton() {
   )
 }
 
-const RISK_BADGE_STYLES = {
-  high: 'bg-rose-100 text-rose-700 border-rose-200',
-  medium: 'bg-amber-100 text-amber-700 border-amber-200',
-  low: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-}
 const PAGE_SIZE = 10
 
 function toDueDateText(value) {
@@ -43,13 +41,6 @@ function toRiskPercent(score, level) {
   if (level === 'medium') return 65
   if (level === 'low') return 30
   return null
-}
-
-function getActionBadgeClass(action) {
-  const normalized = String(action || '').toLowerCase()
-  if (normalized.includes('increase')) return 'bg-rose-100 text-rose-700 border-rose-200'
-  if (normalized.includes('reschedule')) return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-  return 'bg-slate-100 text-slate-700 border-slate-200'
 }
 
 function getActionType(action) {
@@ -106,10 +97,10 @@ function RecommendationDetailPanel({ gauge, onClose, onConfirm, isApplying }) {
     >
       <div className="space-y-5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${RISK_BADGE_STYLES[riskLevel] || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+          <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${riskBadgeStyle(riskLevel) || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
             {riskLabel}
           </span>
-          <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${getActionBadgeClass(gauge.riskAction)}`}>
+          <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${actionBadgeStyle(gauge.riskAction)}`}>
             {actionLabel}
           </span>
         </div>
@@ -156,6 +147,8 @@ function RecommendationDetailPanel({ gauge, onClose, onConfirm, isApplying }) {
 }
 
 function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, onFilterChange, onClearFilters, isFilterActive }) {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const pageParam = parseInt(searchParams.get('page') || '1', 10)
   const currentPage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam
@@ -169,7 +162,6 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     }
     setSearchParams(next, { replace: true })
   }
-  const [selectedGauge, setSelectedGauge] = useState(null)
   const [isApplying, setIsApplying] = useState(false)
   const [sortField, setSortField] = useState(null)
   const [sortDirection, setSortDirection] = useState('asc')
@@ -179,9 +171,41 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     [gauges],
   )
 
+  // ── Drawer state is stored in the URL as ?drawer=<gaugeId> ──────────────
+  const drawerGaugeId = searchParams.get('drawer') || null
+
+  const selectedGauge = useMemo(
+    () => (drawerGaugeId ? recommendationRows.find((g) => String(g.gaugeId) === drawerGaugeId) ?? null : null),
+    [drawerGaugeId, recommendationRows],
+  )
+
+  const openDrawer = (gauge) => {
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params)
+      next.set('drawer', String(gauge.gaugeId))
+      return next
+    }, { replace: true })
+  }
+
+  const closeDrawer = () => {
+    // If we navigated here from another page (e.g. batch drawer), go back there.
+    // Otherwise just strip ?drawer= and stay on the recommendations tab.
+    if (location.state?.from) {
+      navigate(location.state.from)
+    } else {
+      setSearchParams((params) => {
+        const next = new URLSearchParams(params)
+        next.delete('drawer')
+        return next
+      }, { replace: true })
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Legacy ?gaugeKey= deep-link support — redirect to ?drawer= if found
   useEffect(() => {
     const requestedGaugeKey = searchParams.get('gaugeKey')
-    if (!requestedGaugeKey || selectedGauge) return
+    if (!requestedGaugeKey || drawerGaugeId) return
 
     const normalizedRequest = String(requestedGaugeKey).toLowerCase()
     const targetGauge = recommendationRows.find((gauge) => {
@@ -192,14 +216,14 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     })
 
     if (targetGauge) {
-      setSelectedGauge(targetGauge)
       setSearchParams((params) => {
         const next = new URLSearchParams(params)
         next.delete('gaugeKey')
+        next.set('drawer', String(targetGauge.gaugeId))
         return next
-      }, { replace: true })
+      }, { replace: true, state: location.state })  // preserve from state
     }
-  }, [searchParams, recommendationRows, selectedGauge, setSearchParams])
+  }, [searchParams, recommendationRows, drawerGaugeId, setSearchParams])
   const filteredRows = useMemo(() => {
     const query = filters.query.trim().toLowerCase()
     return recommendationRows.filter((gauge) => {
@@ -451,7 +475,7 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
         await onRecommendationApplied()
       }
 
-      setSelectedGauge(null)
+      closeDrawer()
     } catch (error) {
       console.error('Failed to apply recommendation:', error)
     } finally {
@@ -486,7 +510,7 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
           <tbody>
             {paginatedRows.map((gauge) => {
               const riskLevel = String(gauge.riskLevel || '').trim().toLowerCase()
-              const riskStyle = RISK_BADGE_STYLES[riskLevel] || 'bg-slate-100 text-slate-700 border-slate-200'
+              const riskStyle = riskBadgeStyle(riskLevel) || 'bg-slate-100 text-slate-700 border-slate-200'
               const riskPercent = toRiskPercent(gauge.riskScore, riskLevel)
               const riskLabel = riskLevel
                 ? `${riskLevel.toUpperCase()}${riskPercent !== null ? ` (${riskPercent}%)` : ''}`
@@ -508,14 +532,14 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold ${getActionBadgeClass(gauge.riskAction)}`}>
+                    <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold ${actionBadgeStyle(gauge.riskAction)}`}>
                       {actionText}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <button
                       type="button"
-                      onClick={() => setSelectedGauge(gauge)}
+                      onClick={() => openDrawer(gauge)}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50"
                       aria-label={`Open details for ${gauge.gaugeId || 'gauge'}`}
                       title="Open details"
@@ -544,7 +568,7 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
       />
       <RecommendationDetailPanel
         gauge={selectedGauge}
-        onClose={() => setSelectedGauge(null)}
+        onClose={closeDrawer}
         onConfirm={handleConfirmRecommendation}
         isApplying={isApplying}
       />

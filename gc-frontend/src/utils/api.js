@@ -1,8 +1,5 @@
-// Single source of truth for all backend base URLs.
-// All API calls in the frontend must import from here instead of
-// using hardcoded URLs directly.
-export const API_BASE_URL = 'http://localhost:5000' //import.meta.env.VITE_API_BASE_URL
-export const ML_BASE_URL  = 'http://localhost:8000'
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+export const ML_BASE_URL  = import.meta.env.VITE_ML_BASE_URL
 
 /**
  * Thin wrapper around fetch that prepends the Node backend base URL.

@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react'
 import { Pencil } from 'lucide-react'
-import SortableHeader from '../../components/SortableHeader'
 
+import { calculateReminderDate, calculateEscalationDate } from '../../utils/gauge/slaUtils'
+import { riskBadgeStyle, actionBadgeStyle, INFO_CHIP_STYLE, FREQ_CHIP_STYLE } from '../../utils/gauge/badgeStyles'
+
+import SortableHeader from '../../components/SortableHeader'
 import StatusUpdater from '../../components/StatusUpdater'
-import { calculateReminderDate, calculateEscalationDate } from '../../utils/slaUtils'
 
 const statusOptions = ['In Progress', 'Not Started', 'Completed', 'Overdue']
 
@@ -78,31 +80,25 @@ function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeF
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2 text-xs">
-        <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+        <span className={`rounded-full px-3 py-1 font-medium ${INFO_CHIP_STYLE}`}>
           Gauge ID: {gauge.gaugeId}
         </span>
-        <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+        <span className={`rounded-full px-3 py-1 font-medium ${INFO_CHIP_STYLE}`}>
           Gauge Name: {gauge.gaugeName}
         </span>
-        <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+        <span className={`rounded-full px-3 py-1 font-medium ${INFO_CHIP_STYLE}`}>
           Department: {gauge.currentLocation}
         </span>
-        <span className="rounded-full bg-teal-50 px-3 py-1 font-medium text-teal-700">
+        <span className={`rounded-full px-3 py-1 font-medium ${FREQ_CHIP_STYLE}`}>
           Frequency: {gauge.frequency} months
         </span>
         {gauge.riskLevel && (
-          <span className={`rounded-full px-3 py-1 font-medium ${
-            gauge.riskLevel === 'high'
-              ? 'bg-rose-100 text-rose-700'
-              : gauge.riskLevel === 'medium'
-              ? 'bg-amber-100 text-amber-700'
-              : 'bg-emerald-100 text-emerald-700'
-          }`}>
+          <span className={`rounded-full border px-3 py-1 font-medium ${riskBadgeStyle(gauge.riskLevel) || ''}`}>
             Risk: {gauge.riskLevel.charAt(0).toUpperCase() + gauge.riskLevel.slice(1)}
           </span>
         )}
         {gauge.riskAction && (
-          <span className="rounded-full bg-violet-50 px-3 py-1 font-medium text-violet-700">
+          <span className={`rounded-full border px-3 py-1 font-medium ${actionBadgeStyle(gauge.riskAction)}`}>
             Action: {gauge.riskAction}
           </span>
         )}
