@@ -1,6 +1,6 @@
 .env
 
-# to ignore __pycache__in all folders
+# to ignore __pycache__ in all folders
 */__pycache__/  
 
 model/
