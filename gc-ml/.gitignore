@@ -1,0 +1,8 @@
+.env
+
+# to ignore __pycache__ in all folders
+**/__pycache__/  
+
+model/
+
+risk_pipeline_analysis.md

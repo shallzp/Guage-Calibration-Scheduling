@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from app.db.repositories.gauge import ( add_latest_prediction, add_ml_features, load_gauge_records_from_db )
+from app.db.repositories.current_batches import update_current_batch_risk
+from app.db.repositories.previous_batches import update_previous_batch_risk
+from app.db.repositories.batches import update_unified_batch_risk
+from app.db.mongo_client import get_db, gauge_lookup_filter
+from app.ml.classifier import build_risk_payload
+
+def update_single_gauge_prediction(gauge_key: str, *, update_batches: bool = True) -> dict[str, Any]:
+    today = datetime.utcnow()
+    db = get_db()
+    normalized_key = str(gauge_key or "").strip()
+    gauge = db["gauges"].find_one(gauge_lookup_filter(normalized_key), {"_id": 0})
+    if not gauge:
+        raise ValueError(f"Gauge {normalized_key} not found")
+
+    resolved_key = str(gauge.get("gauge_key") or gauge.get("gauge_id") or normalized_key).strip()
+    payload = build_risk_payload(gauge, today=today)
+    add_ml_features(resolved_key, payload["ml_features"])
+    add_latest_prediction(resolved_key, payload["latest_prediction"])
+
+    if update_batches:
+        update_current_batch_risk()
+        update_previous_batch_risk()
+        update_unified_batch_risk()
+
+    return {"gauge_key": resolved_key, "updated": True}
+
+
+def update_all_gauge_predictions(*, update_batches: bool = True) -> dict[str, Any]:
+    gauges = load_gauge_records_from_db()
+    updated = 0
+    errors: list[str] = []
+
+    for gauge in gauges:
+        gauge_key = str(gauge.get("gauge_key") or "").strip()
+        if not gauge_key:
+            continue
+
+        try:
+            payload = build_risk_payload(gauge, today=datetime.utcnow())
+            if not add_ml_features(gauge_key, payload["ml_features"]):
+                errors.append(f"ml_features:{gauge_key}")
+                continue
+            if not add_latest_prediction(gauge_key, payload["latest_prediction"]):
+                errors.append(f"latest_prediction:{gauge_key}")
+                continue
+            updated += 1
+        except (ValueError, TypeError) as exc:
+            errors.append(f"{gauge_key}:{exc}")
+
+    current_risk_updated = 0
+    previous_risk_updated = 0
+    unified_risk_updated = 0
+    if update_batches:
+        # Only update risk data on existing batch documents — do not rebuild structure
+        current_risk_updated = update_current_batch_risk()
+        previous_risk_updated = update_previous_batch_risk()
+        unified_risk_updated = update_unified_batch_risk()
+
+    return {
+        "updated": updated,
+        "total": len(gauges),
+        "errors": errors,
+        "current_risk_updated": current_risk_updated,
+        "previous_risk_updated": previous_risk_updated,
+        "unified_risk_updated": unified_risk_updated,
+    }
