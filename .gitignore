@@ -1,1 +1,10 @@
-.vscode/*
+.vscode/
+
+*/node_modules/
+*/dist/
+*/.env
+*/data/
+*/.vite/
+
+*/__pycache__/
+*/model/

@@ -149,13 +149,23 @@ function sanitizeGaugePatch(payload, { normalizeStakeholdersPayload }) {
   return patch;
 }
 
+/**
+ * Business rule: a schedule row becomes 'overdue' once today is at least
+ * OVERDUE_THRESHOLD_DAYS past its due_date.
+ *
+ * Rule: due_date + OVERDUE_THRESHOLD_DAYS days <= today  →  status = 'overdue'
+ *
+ * Exported so the rule is a single, shared source of truth.
+ */
 const OVERDUE_THRESHOLD_DAYS = 15;
 
 /**
  * Returns the correct status for a non-completed schedule row based on today.
- * - 'overdue'     if due_date was >= OVERDUE_THRESHOLD_DAYS ago
- * - 'in-progress' if due_date is in the past but within threshold (or today)
- * - 'not-started' if due_date is in the future
+ *
+ * Logic:
+ *   daysSinceDue >= OVERDUE_THRESHOLD_DAYS (15)  →  'overdue'
+ *   daysSinceDue >= 0 (due today or within threshold)  →  'in-progress'
+ *   daysSinceDue <  0 (due in the future)              →  'not-started'
  *
  * Returns null if due_date is missing/invalid (caller should skip the row).
  */
@@ -168,7 +178,7 @@ function deriveRowStatus(row, today) {
   const daysSinceDue = Math.floor((today - due) / (1000 * 60 * 60 * 24));
 
   if (daysSinceDue >= OVERDUE_THRESHOLD_DAYS) return 'overdue';
-  if (daysSinceDue >= 0) return 'in-progress'; // due today or recently past — active
+  if (daysSinceDue >= 0) return 'in-progress'; // due today or within threshold
   return 'not-started';                         // due in the future
 }
 
@@ -179,5 +189,6 @@ module.exports = {
   normalizeScheduleRow,
   normalizeLatestPredictionPatch,
   sanitizeGaugePatch,
-  deriveRowStatus
+  deriveRowStatus,
+  OVERDUE_THRESHOLD_DAYS,
 };

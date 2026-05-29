@@ -1,7 +1,7 @@
 const express = require('express');
 const Gauge = require('../models/gauge/Gauge');
 
-const { sanitizeGaugePatch, normalizeScheduleStatus, parseDateValue, deriveRowStatus } = require('../utils/gaugeUtils');
+const { sanitizeGaugePatch, normalizeScheduleStatus, parseDateValue, deriveRowStatus, OVERDUE_THRESHOLD_DAYS } = require('../utils/gaugeUtils');
 
 const { normalizeStakeholdersPayload, hydrateStakeholders } = require('../utils/stakeholderUtils');
 const { computeRiskSummary } = require('../utils/riskUtils');
@@ -15,9 +15,19 @@ const router = express.Router();
 /**
  * Called once on app load (from App.jsx before gauges are fetched).
  *
- * Re-derives the correct status for every non-completed schedule row,
- * correcting any stale values (including wrongly-set 'overdue' entries
- * whose due_date may have been shifted forward).
+ * Automatic status transitions applied by this job:
+ *
+ *   'not-started' → 'overdue'     if due_date + OVERDUE_THRESHOLD_DAYS <= today
+ *                   (skipped for in-progress — that transition is manual-only)
+ *
+ *   'in-progress' → 'overdue'     if due_date + OVERDUE_THRESHOLD_DAYS <= today
+ *
+ *   'overdue'     → 'in-progress' if due_date was shifted forward and is no longer
+ *                   past the threshold (never corrects back to 'not-started')
+ *
+ * NEVER touched automatically:
+ *   'not-started' → 'in-progress' (manual only)
+ *   'completed'   → anything      (never changed)
  *
  * Only gauges with at least one row that actually changed are written to DB.
  * Batch collections are synced for every gauge that was updated.
@@ -28,27 +38,41 @@ router.post('/recalculate-overdue', async (req, res) => {
     today.setHours(0, 0, 0, 0);
 
     // Fetch all gauges that have at least one non-completed row
+    // (not-started, in-progress, and overdue rows are all included)
     const gauges = await Gauge.find({
       'schedule_table': {
         $elemMatch: { status: { $ne: 'completed' } },
       },
     }).lean();
 
-    const results = { checked: gauges.length, updated: 0, skipped: 0 };
+    const results = { checked: gauges.length, updated: 0, skipped: 0, thresholdDays: OVERDUE_THRESHOLD_DAYS };
 
     for (const gauge of gauges) {
       const rows = Array.isArray(gauge.schedule_table) ? gauge.schedule_table : [];
 
-      // Only promote rows to overdue; do not downgrade other statuses.
+      // Allowed automatic transitions:
+      //   not-started → overdue     (threshold crossed; not-started → in-progress is manual)
+      //   in-progress → overdue     (threshold crossed)
+      //   overdue     → in-progress (wrongly overdue; due date shifted forward)
+      //                              never corrects overdue back to 'not-started'
       const rowsToUpdate = rows
-        .filter((row) => row.status !== 'completed')
+        .filter((row) => row.status === 'not-started' || row.status === 'in-progress' || row.status === 'overdue')
         .map((row) => {
-          const correctStatus = deriveRowStatus(row, today);
-          if (!correctStatus) return null; // invalid due_date — skip
-          //if(correctStatus === row.status) return null; //alredy correct - skip
-          if (correctStatus !== 'overdue') return null;
-          if (row.status === 'overdue') return null; // already overdue — skip
-          return { row, correctStatus };
+          const derivedStatus = deriveRowStatus(row, today);
+          if (!derivedStatus) return null; // invalid due_date — skip
+
+          // Wrongly overdue: due date shifted forward, threshold no longer crossed
+          if (row.status === 'overdue' && derivedStatus !== 'overdue') {
+            return { row, correctStatus: 'in-progress' }; // always land on in-progress, not not-started
+          }
+
+          // Promote to overdue: threshold crossed for in-progress or not-started
+          if (derivedStatus === 'overdue' && row.status !== 'overdue') {
+            return { row, correctStatus: 'overdue' };
+          }
+
+          // not-started → in-progress is manual-only; skip all other no-change cases
+          return null;
         })
         .filter(Boolean);
 
@@ -101,7 +125,7 @@ router.post('/recalculate-overdue', async (req, res) => {
     }
 
     console.log(
-      `[recalculate-overdue] checked: ${results.checked}, updated: ${results.updated}, skipped: ${results.skipped}`,
+      `[recalculate-overdue] threshold=${OVERDUE_THRESHOLD_DAYS}d | checked: ${results.checked}, updated: ${results.updated}, skipped: ${results.skipped}`,
     );
     return res.json(results);
   } catch (error) {

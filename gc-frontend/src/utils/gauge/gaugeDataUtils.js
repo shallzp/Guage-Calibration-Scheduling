@@ -56,6 +56,25 @@ export function getLastCompletionDateFromSchedule(scheduleRows, fallback) {
   return sorted[sorted.length - 1].text
 }
 
+export function getRiskActionLabel(action) {
+  const normalized = String(action || '').trim().toLowerCase().replace(/\s+/g, '_')
+  if (!normalized || normalized === 'no_change' || normalized === 'no_chnage' || normalized === 'nochange') {
+    return 'No Change'
+  }
+  if (normalized.includes('increase')) return 'Increase Frequency'
+  if (normalized.includes('reschedule')) return 'Reschedule'
+  return normalized.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+export function getRiskLevelLabel(level) {
+  const normalized = String(level || '').trim().toLowerCase().replace(/\s+/g, '_')
+  if (!normalized) return ''
+  if (normalized === 'high') return 'High'
+  if (normalized === 'medium') return 'Medium'
+  if (normalized === 'low') return 'Low'
+  return normalized.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 
 function normalizeApiStatus(status) {
   const value = String(status || '').trim().toLowerCase()

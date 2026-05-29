@@ -7,6 +7,15 @@ export function parseDate(dateString) {
   return new Date(year, month - 1, day)
 }
 
+export function parseDateAny(value) {
+  if (!value || value === '-' || value === 'Not Available') return null
+  const text = String(value).trim()
+  if (!text) return null
+  if (text.includes('/')) return parseDate(text)
+  const parsed = new Date(text)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 export function parseDayMonthYear(dateText) {
   if (!dateText) return { year: '', month: '' }
   const [day, month, year] = String(dateText).split('/')
@@ -24,17 +33,17 @@ export function formatDate(date) {
   return `${day}/${month}/${year}`
 }
 
-export function formatISODate(isoDateString) {
-  if (!isoDateString) return ''
-  const date = new Date(isoDateString)
-  if (isNaN(date.getTime())) return ''
-  return formatDate(date)
+
+
+export function formatDisplayDate(value, fallback = '-') {
+  const parsed = parseDateAny(value)
+  if (!parsed) return fallback
+  return formatDate(parsed)
 }
 
-export function addDays(date, days) {
-  const nextDate = new Date(date)
-  nextDate.setDate(nextDate.getDate() + days)
-  return nextDate
+export function toDateSortValue(value) {
+  const parsed = parseDateAny(value)
+  return parsed ? parsed.getTime() : 0
 }
 
 export function addHours(date, hours) {

@@ -317,7 +317,7 @@ async function refreshCurrentBatchSummary(batchKey) {
 
   const summary = { in_progress: 0, not_started: 0, completed: 0, overdue: 0 };
   for (const g of gauges) {
-    const s = String(g.status || '').toLowerCase().replace(/\s+/g, '_');
+    const s = String(g.status || '').toLowerCase().replace(/[^a-z]/g, '_');
     if      (s === 'in_progress')  summary.in_progress++;
     else if (s === 'not_started')  summary.not_started++;
     else if (s === 'completed')    summary.completed++;
@@ -328,18 +328,19 @@ async function refreshCurrentBatchSummary(batchKey) {
   await CurrentBatch.findByIdAndUpdate(batchKey, { $set: { guage_summary: summary } });
 }
 
+async function refreshAllCurrentBatchSummaries() {
+  const batches = await CurrentBatch.find({}, { _id: 1 }).lean();
+  for (const batch of batches) {
+    await refreshCurrentBatchSummary(batch._id);
+  }
+}
+
 /**
  * Add a gauge to `previous_batches`.
- * Snapshot is written once on first archival — never overwritten.
+ * Snapshot is refreshed whenever the gauge is archived.
  * Uses buildPreviousSnapshotFromGauge shape (no completion_status).
  */
 async function upsertPreviousBatch(batchKey, batchDate, gaugeKey, previousSnapshot) {
-  const existing = await PreviousBatch.findById(batchKey).lean();
-  const snapshotAlreadyWritten =
-    existing &&
-    Array.isArray(existing.snapshot) &&
-    existing.snapshot.some((s) => s.gauge_key === gaugeKey);
-
   await PreviousBatch.findByIdAndUpdate(
     batchKey,
     {
@@ -354,7 +355,11 @@ async function upsertPreviousBatch(batchKey, batchDate, gaugeKey, previousSnapsh
     { upsert: true },
   );
 
-  if (previousSnapshot && !snapshotAlreadyWritten) {
+  if (previousSnapshot) {
+    await PreviousBatch.findByIdAndUpdate(
+      batchKey,
+      { $pull: { snapshot: { gauge_key: gaugeKey } } },
+    );
     await PreviousBatch.findByIdAndUpdate(
       batchKey,
       { $push: { snapshot: previousSnapshot } },
@@ -391,7 +396,7 @@ async function removePreviousBatch(batchKey, gaugeKey) {
  *
  * Snapshot policies:
  *   batches          → always reflects latest gauge state (real-time overwrite)
- *   previous_batches → written once on first archival, never updated after that
+ *   previous_batches → refreshed when a gauge is archived
  */
 async function syncBatchCollections(gaugeKey, oldMap, newMap) {
   let oldKeys = {};
@@ -461,8 +466,10 @@ async function syncBatchCollections(gaugeKey, oldMap, newMap) {
 }
 
 module.exports = {
+  buildSnapshotFromGauge,
   computeBatchKeys,
   computeGaugeDates,
   computeGaugeStatus,
+  refreshAllCurrentBatchSummaries,
   syncBatchCollections,
 };

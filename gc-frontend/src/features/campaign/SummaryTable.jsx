@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { formatISODate } from '../../utils/dateUtils'
+import { formatDisplayDate, toDateSortValue } from '../../utils/dateUtils'
 
 import SortableHeader from '../../components/SortableHeader'
 import Pagination from '../../components/Pagination'
@@ -13,7 +13,7 @@ function formatCellValue(value, key) {
     // Format date fields
     if (key && (key.includes('Date') || key === 'startDate' || key === 'endDate')) {
         if (typeof value === 'string' || value instanceof String) {
-            const formatted = formatISODate(value)
+            const formatted = formatDisplayDate(value, '')
             return formatted || '-'
         }
     }
@@ -29,6 +29,8 @@ function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [], c
     const [searchParams, setSearchParams] = useSearchParams()
     const pageParam = parseInt(searchParams.get('page') || '1', 10)
     const currentPage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam
+    const sortParam = searchParams.get('sort')
+    const dirParam = searchParams.get('dir')
 
     const setCurrentPage = (page) => {
         const next = new URLSearchParams(searchParams)
@@ -39,8 +41,8 @@ function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [], c
         }
         setSearchParams(next, { replace: true })
     }
-    const [sortField, setSortField] = useState(null)
-    const [sortDirection, setSortDirection] = useState('asc')
+    const [sortField, setSortField] = useState(sortParam || null)
+    const [sortDirection, setSortDirection] = useState(dirParam === 'desc' ? 'desc' : 'asc')
 
     const isInitialMount = useRef(true)
     useEffect(() => {
@@ -60,6 +62,21 @@ function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [], c
         }
     }, [clearFilterTrigger, onSortChange])
 
+    useEffect(() => {
+        const next = new URLSearchParams(searchParams)
+        if (sortField) {
+            next.set('sort', sortField)
+            next.set('dir', sortDirection)
+        } else {
+            next.delete('sort')
+            next.delete('dir')
+        }
+
+        if (next.toString() !== searchParams.toString()) {
+            setSearchParams(next, { replace: true })
+        }
+    }, [sortDirection, sortField, searchParams, setSearchParams])
+
     const sortedRows = useMemo(() => {
         if (!sortField) return rows
         return [...rows].sort((a, b) => {
@@ -67,9 +84,8 @@ function SummaryTable({ title, rows = [], firstColumnLabel, extraColumns = [], c
             let bVal = b[sortField]
 
             if (sortField.toLowerCase().includes('date')) {
-                const parseD = (val) => (!val || val === '-' ? 0 : new Date(val).getTime() || 0)
-                aVal = parseD(aVal)
-                bVal = parseD(bVal)
+                aVal = toDateSortValue(aVal)
+                bVal = toDateSortValue(bVal)
             }
 
             if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1

@@ -2,8 +2,9 @@ import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { PanelRightOpen } from 'lucide-react'
 
-import { formatDate } from '../../utils/dateUtils'
-import { riskBadgeStyle, riskCardStyle, statusBadgeStyle } from '../../utils/gauge/badgeStyles'
+import { formatDate, formatDisplayDate, toDateSortValue } from '../../utils/dateUtils'
+import { riskBadgeStyle, riskCardStyle, statusBadgeStyle, FREQ_CHIP_STYLE } from '../../utils/gauge/badgeStyles'
+import { getRiskActionLabel, getRiskLevelLabel } from '../../utils/gauge/gaugeDataUtils'
 
 import Pagination from '../../components/Pagination'
 import TableSkeleton from '../../components/TableSkeleton'
@@ -15,7 +16,7 @@ export function GaugeBatchesSkeleton() {
   return (
     <>
       <div className='my-5'>
-        <section className="rounded-3xl border border-white/60 bg-[color:var(--card)] p-5 shadow-sm backdrop-blur">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="h-3 w-24 rounded-full bg-slate-200/70 animate-pulse" />
@@ -53,7 +54,7 @@ function formatBatchDate(batch) {
   if (batch.date) {
     const d = new Date(batch.date)
     if (!isNaN(d.getTime())) {
-      return formatDate(d)
+      return formatDisplayDate(d)
     }
   }
   // Fallback: parse YYYYMMDD suffix from _id (e.g. "BATCH-20221101")
@@ -62,7 +63,7 @@ function formatBatchDate(batch) {
     const s = match[1] // "20221101"
     const d = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`)
     if (!isNaN(d.getTime())) {
-      return formatDate(d)
+      return formatDisplayDate(d)
     }
   }
   return '—'
@@ -100,8 +101,8 @@ function RiskCountPills({ riskSummary = {} }) {
 function GaugeSummaryPills({ gaugeSummary = {} }) {
   const inProgress = gaugeSummary.in_progress ?? 0
   const notStarted = gaugeSummary.not_started ?? 0
-  const completed  = gaugeSummary.completed   ?? 0
-  const overdue    = gaugeSummary.overdue     ?? 0
+  const completed = gaugeSummary.completed ?? 0
+  const overdue = gaugeSummary.overdue ?? 0
   const total = inProgress + notStarted + completed + overdue
   if (total === 0) return <span className="text-xs text-slate-400">—</span>
   return (
@@ -112,6 +113,15 @@ function GaugeSummaryPills({ gaugeSummary = {} }) {
       {overdue > 0 && <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${statusBadgeStyle('Overdue')}`}>Overdue: {overdue}</span>}
     </div>
   )
+}
+
+function formatStatusLabel(value) {
+  const text = String(value || '').trim()
+  if (!text) return 'Not Started'
+  return text
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 // Side panel — matches reference image exactly
 function BatchDetailPanel({ batch, allGauges, onClose, onOpenRecommendation, onOpenSchedule }) {
@@ -171,76 +181,78 @@ function BatchDetailPanel({ batch, allGauges, onClose, onOpenRecommendation, onO
           [...gaugeDetails]
             .sort((a, b) => (Number(b.latest_prediction?.risk_score) || 0) - (Number(a.latest_prediction?.risk_score) || 0))
             .map((gauge) => {
-            const riskLevel = String(gauge.latest_prediction?.risk_level || '').toLowerCase()
-            const hasRisk = riskLevel === 'high' || riskLevel === 'medium' || riskLevel === 'low'
-            const cardStyle = riskCardStyle(riskLevel)
-            const badgeStyle = riskBadgeStyle(riskLevel)
-            const riskLabel = riskLevel.toUpperCase()
-            const rawAction = String(gauge.latest_prediction?.action || '').trim()
-            const normalizedAction = rawAction.toLowerCase()
-            const showAction = normalizedAction && normalizedAction !== 'no_change' && normalizedAction !== 'no_chnage'
-            const formatActionLabel = (value) =>
-              value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-            const actionLabel = rawAction ? formatActionLabel(rawAction) : 'Recommended Action'
-            const parts = String(gauge.gauge_key || '').split('::')
-            const gaugeCode = parts.length > 1 ? parts[parts.length - 1] : gauge.gauge_key
-            const showRecommendation = riskLevel === 'high' || riskLevel === 'medium'
-            const gaugeStatus = String(gauge.status || '').trim()
-            const sbStyle = statusBadgeStyle(gaugeStatus)
+              const riskLevel = String(gauge.latest_prediction?.risk_level || '').toLowerCase()
+              const hasRisk = riskLevel === 'high' || riskLevel === 'medium' || riskLevel === 'low'
+              const cardStyle = riskCardStyle(riskLevel)
+              const badgeStyle = riskBadgeStyle(riskLevel)
+              const riskLabel = getRiskLevelLabel(riskLevel)
+              const rawAction = String(gauge.latest_prediction?.action || '').trim()
+              const normalizedAction = rawAction.toLowerCase()
+              const showAction = normalizedAction && normalizedAction !== 'no_change' && normalizedAction !== 'no_chnage'
+              const actionLabel = getRiskActionLabel(rawAction)
+              const parts = String(gauge.gauge_key || '').split('::')
+              const gaugeCode = parts.length > 1 ? parts[parts.length - 1] : gauge.gauge_key
+              const showRecommendation = riskLevel === 'high' || riskLevel === 'medium'
+              const gaugeStatus = String(gauge.status || '').trim()
+              const statusLabel = formatStatusLabel(gaugeStatus)
+              const sbStyle = statusBadgeStyle(gaugeStatus) || statusBadgeStyle(statusLabel) || statusBadgeStyle('Not Started')
 
-            return (
-              <div
-                key={gauge.gauge_key}
-                className={`relative w-full rounded-xl border p-4 text-left shadow-sm transition ${cardStyle}`}
-              >
-                {/* Top-right: status pill + risk pill side by side */}
-                <div className="absolute right-3 top-3 flex items-center gap-1.5">
-                  {gaugeStatus && sbStyle && (
-                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sbStyle}`}>
-                      {gaugeStatus}
+              return (
+                <div
+                  key={gauge.gauge_key}
+                  className={`relative w-full rounded-xl border p-4 text-left shadow-sm transition ${cardStyle}`}
+                >
+                  {/* Top-right: status pill + risk pill side by side */}
+                  <div className="absolute right-3 top-3 flex items-center gap-1.5">
+                    {Number.isFinite(Number(gauge.frequency)) && (
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${FREQ_CHIP_STYLE}`}>
+                        Frequency: {Number(gauge.frequency)}
+                      </span>
+                    )}
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sbStyle || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                      {statusLabel}
                     </span>
-                  )}
-                  {hasRisk && badgeStyle && (
-                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badgeStyle}`}>
-                      {riskLabel}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold uppercase tracking-wide text-slate-900 leading-snug">
-                      {gauge.gauge_name || gaugeCode}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-400">{gaugeCode}</p>
+                    {hasRisk && badgeStyle && (
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badgeStyle}`}>
+                        {riskLabel}
+                      </span>
+                    )}
                   </div>
-                </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold uppercase tracking-wide text-slate-900 leading-snug">
+                        {gauge.gauge_name || gaugeCode}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-400">{gaugeCode}</p>
+                    </div>
+                  </div>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onOpenSchedule?.(gauge)}
-                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 whitespace-nowrap"
-                  >
-                    Schedule
-                  </button>
-                  {showRecommendation && (
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => onOpenRecommendation?.(gauge)}
-                      className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 whitespace-nowrap"
+                      onClick={() => onOpenSchedule?.(gauge)}
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 whitespace-nowrap"
                     >
-                      Recommendations
+                      Schedule
                     </button>
+                    {showRecommendation && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenRecommendation?.(gauge)}
+                        className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 whitespace-nowrap"
+                      >
+                        Recommendations
+                      </button>
+                    )}
+                  </div>
+                  {showAction && (
+                    <span className="absolute bottom-3 right-3 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600">
+                      {actionLabel}
+                    </span>
                   )}
                 </div>
-                {showAction && (
-                  <span className="absolute bottom-3 right-3 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600">
-                    {actionLabel}
-                  </span>
-                )}
-              </div>
-            )
-          })}
+              )
+            })}
       </div>
     </Drawer>
   )
@@ -327,14 +339,12 @@ function GaugeBatches({ batches = [], allGauges = [] }) {
       if (sortField === 'batchDate') {
         const parseD = (batch) => {
           if (batch.date) {
-            const d = new Date(batch.date)
-            if (!isNaN(d.getTime())) return d.getTime()
+            return toDateSortValue(batch.date)
           }
           const match = String(batch._id || '').match(/(\d{8})$/)
           if (match) {
             const s = match[1]
-            const d = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`)
-            if (!isNaN(d.getTime())) return d.getTime()
+            return toDateSortValue(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`)
           }
           return 0
         }
@@ -375,7 +385,7 @@ function GaugeBatches({ batches = [], allGauges = [] }) {
   const handleOpenRecommendation = (gauge) => {
     const gaugeKey = gauge?.gauge_key || gauge?.key
     if (!gaugeKey) return
-    
+
     const cleanParams = new URLSearchParams(location.search)
     cleanParams.delete('drawer')
     const cleanSearch = cleanParams.toString() ? `?${cleanParams.toString()}` : ''
@@ -403,9 +413,9 @@ function GaugeBatches({ batches = [], allGauges = [] }) {
   return (
     <>
       <div className='my-5'>
-        <section className="rounded-3xl border border-white/60 bg-[color:var(--card)] p-5 shadow-sm backdrop-blur">
+        <section className="rounded-2xl border border-white/60 bg-white p-5 shadow-sm backdrop-blur">
           <div className="grid gap-3 sm:grid-cols-4">
-            <button 
+            <button
               onClick={() => { setFilterRisk('all'); setCurrentPage(1); }}
               className={`text-left rounded-2xl border border-slate-200 bg-slate-50 p-4 transition-all hover:shadow-md ${filterRisk === 'all' ? 'ring-2 ring-slate-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
             >
@@ -413,7 +423,7 @@ function GaugeBatches({ batches = [], allGauges = [] }) {
               <p className="mt-4 text-3xl font-bold text-slate-900">{batches.length}</p>
               <p className="mt-1 text-xs text-slate-500">Current open batches</p>
             </button>
-            <button 
+            <button
               onClick={() => { setFilterRisk('high'); setCurrentPage(1); }}
               className={`text-left rounded-2xl border border-rose-200 bg-rose-50/70 p-4 transition-all hover:shadow-md ${filterRisk === 'high' ? 'ring-2 ring-rose-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
             >
@@ -421,7 +431,7 @@ function GaugeBatches({ batches = [], allGauges = [] }) {
               <p className="mt-4 text-3xl font-bold text-rose-700">{highRiskCount}</p>
               <p className="mt-1 text-xs text-rose-600">Risk score ≥ 70%</p>
             </button>
-            <button 
+            <button
               onClick={() => { setFilterRisk('medium'); setCurrentPage(1); }}
               className={`text-left rounded-2xl border border-amber-200 bg-amber-50/70 p-4 transition-all hover:shadow-md ${filterRisk === 'medium' ? 'ring-2 ring-amber-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
             >
@@ -429,7 +439,7 @@ function GaugeBatches({ batches = [], allGauges = [] }) {
               <p className="mt-4 text-3xl font-bold text-amber-700">{mediumRiskCount}</p>
               <p className="mt-1 text-xs text-amber-600">Risk score 40% - 69%</p>
             </button>
-            <button 
+            <button
               onClick={() => { setFilterRisk('low'); setCurrentPage(1); }}
               className={`text-left rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 transition-all hover:shadow-md ${filterRisk === 'low' ? 'ring-2 ring-emerald-400 shadow-md' : 'opacity-80 hover:opacity-100'}`}
             >

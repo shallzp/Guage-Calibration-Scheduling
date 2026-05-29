@@ -37,7 +37,7 @@ export function statusBadgeStyle(status) {
   const exact = STATUS_BADGE_STYLES[status]
   if (exact) return exact
   // Try normalised → display form
-  const norm = String(status || '').toLowerCase().replace(/\s+/g, '_')
+  const norm = String(status || '').toLowerCase().replace(/[^a-z]+/g, '_')
   const map = {
     in_progress: STATUS_BADGE_STYLES['In Progress'],
     not_started: STATUS_BADGE_STYLES['Not Started'],

@@ -1,8 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Pencil } from 'lucide-react'
 
 import { calculateReminderDate, calculateEscalationDate } from '../../utils/gauge/slaUtils'
+import { toDateSortValue } from '../../utils/dateUtils'
 import { riskBadgeStyle, actionBadgeStyle, INFO_CHIP_STYLE, FREQ_CHIP_STYLE } from '../../utils/gauge/badgeStyles'
+import { getRiskActionLabel, getRiskLevelLabel } from '../../utils/gauge/gaugeDataUtils'
 
 import SortableHeader from '../../components/SortableHeader'
 import StatusUpdater from '../../components/StatusUpdater'
@@ -10,8 +13,30 @@ import StatusUpdater from '../../components/StatusUpdater'
 const statusOptions = ['In Progress', 'Not Started', 'Completed', 'Overdue']
 
 function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeFrequency, onEditDueDate }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const sortParam = searchParams.get('sort')
+  const dirParam = searchParams.get('dir')
   const [sortField, setSortField] = useState(null)
   const [sortDirection, setSortDirection] = useState('asc')
+  useEffect(() => {
+    setSortField(sortParam || null)
+    setSortDirection(dirParam === 'desc' ? 'desc' : 'asc')
+  }, [dirParam, sortParam])
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (sortField) {
+      next.set('sort', sortField)
+      next.set('dir', sortDirection)
+    } else {
+      next.delete('sort')
+      next.delete('dir')
+    }
+
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [sortDirection, sortField, searchParams, setSearchParams])
 
   const sortedSchedule = useMemo(() => {
     const enhanced = gauge?.schedule?.map((row, i) => ({
@@ -29,10 +54,8 @@ function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeF
 
       if (['dueDate', 'completionDate', 'calcReminder', 'calcEscalation'].includes(sortField)) {
         const parseD = (val) => {
-          if (!val || val === '-' || val === 'Not Available') return 0
-          // remove " - " if it's in the reminder string format like "01 Jan 2026 - 10:00 AM"
-          const cleanVal = val.includes(' - ') ? val.split(' - ')[0] : val
-          return new Date(cleanVal).getTime() || 0
+          const cleanVal = String(val || '').includes(' - ') ? String(val).split(' - ')[0] : val
+          return toDateSortValue(cleanVal)
         }
         aVal = parseD(aVal)
         bVal = parseD(bVal)
@@ -56,7 +79,7 @@ function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeF
   if (!gauge) return null
 
   return (
-    <section className="mt-7 fade-in-up overflow-hidden rounded-3xl border border-white/60 bg-[color:var(--card)] p-5 shadow-[0_20px_55px_rgba(18,38,63,0.14)] backdrop-blur md:p-8">
+    <section className="mt-7 fade-in-up overflow-hidden rounded-2xl border border-white/60 bg-white p-5 shadow-sm backdrop-blur md:p-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="display-font text-2xl font-semibold text-slate-900">Schedule Table</h3>
         <div className="flex flex-wrap items-center gap-2">
@@ -94,12 +117,12 @@ function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeF
         </span>
         {gauge.riskLevel && (
           <span className={`rounded-full border px-3 py-1 font-medium ${riskBadgeStyle(gauge.riskLevel) || ''}`}>
-            Risk: {gauge.riskLevel.charAt(0).toUpperCase() + gauge.riskLevel.slice(1)}
+            Risk: {getRiskLevelLabel(gauge.riskLevel)}
           </span>
         )}
         {gauge.riskAction && (
           <span className={`rounded-full border px-3 py-1 font-medium ${actionBadgeStyle(gauge.riskAction)}`}>
-            Action: {gauge.riskAction}
+            Action: {getRiskActionLabel(gauge.riskAction)}
           </span>
         )}
       </div>
@@ -119,35 +142,35 @@ function GaugeTable({ gauge, slaConfig, onStatusChange, onAddSchedule, onChangeF
             {sortedSchedule.map((row) => {
               const index = row.originalIndex
               return (
-              <tr key={row.id} className="group border-t border-slate-200/80 text-slate-700">
-                <td className="px-4 py-3 font-medium">
-                  <div className="flex items-center gap-2">
-                    <span>{row.dueDate}</span>
-                    {row.status !== 'Completed' && (
-                      <button
-                        type="button"
-                        onClick={() => onEditDueDate?.(index)}
-                        className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm opacity-0 transition hover:border-slate-300 hover:text-slate-800 group-hover:opacity-100"
-                        aria-label="Edit due date"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </td>
-                <StatusUpdater
-                  status={row.status}
-                  statusOptions={statusOptions}
-                  completionDate={row.completionDate}
-                  onStatusChange={(nextStatus) => onStatusChange(index, nextStatus)}
-                />
-                <td className="px-4 py-3">
-                  {row.calcReminder}
-                </td>
-                <td className="px-4 py-3">
-                  {row.calcEscalation}
-                </td>
-              </tr>
+                <tr key={row.id} className="group border-t border-slate-200/80 text-slate-700">
+                  <td className="px-4 py-3 font-medium">
+                    <div className="flex items-center gap-2">
+                      <span>{row.dueDate}</span>
+                      {row.status !== 'Completed' && (
+                        <button
+                          type="button"
+                          onClick={() => onEditDueDate?.(index)}
+                          className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm opacity-0 transition hover:border-slate-300 hover:text-slate-800 group-hover:opacity-100"
+                          aria-label="Edit due date"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <StatusUpdater
+                    status={row.status}
+                    statusOptions={statusOptions}
+                    completionDate={row.completionDate}
+                    onStatusChange={(nextStatus) => onStatusChange(index, nextStatus)}
+                  />
+                  <td className="px-4 py-3">
+                    {row.calcReminder}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.calcEscalation}
+                  </td>
+                </tr>
               )
             })}
           </tbody>

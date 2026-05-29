@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import Pagination from '../../components/Pagination'
 import TableSkeleton from '../../components/TableSkeleton'
 
-import { formatISODate } from '../../utils/dateUtils'
+import { formatDisplayDate } from '../../utils/dateUtils'
 
 function toDisplayValue(value, key, fallback = 'Not Available') {
     if (value === null || value === undefined) return fallback
@@ -12,7 +12,7 @@ function toDisplayValue(value, key, fallback = 'Not Available') {
     // Format date fields
     if (key && (key.includes('Date') || key === 'PO Date' || key === 'Dispatch Date')) {
         if (typeof value === 'string' || value instanceof String) {
-            const formatted = formatISODate(value)
+            const formatted = formatDisplayDate(value, '')
             return formatted || fallback
         }
     }

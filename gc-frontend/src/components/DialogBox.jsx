@@ -1,5 +1,5 @@
 function DialogBox({ isOpen, title, message, children, onConfirm, onCancel, confirmText = 'Confirm', cancelText = 'Cancel' }) {
-    
+
     if (!isOpen) return null
 
     return (

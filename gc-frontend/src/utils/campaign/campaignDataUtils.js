@@ -1,4 +1,4 @@
-import { parseDate, parseDayMonthYear } from '../dateUtils'
+import { formatDisplayDate, parseDate, parseDayMonthYear } from '../dateUtils'
 
 function toDisplayValue(value, fallback = 'Not Available') {
   if (value === null || value === undefined) return fallback
@@ -31,8 +31,8 @@ export function normalizeCampaignRow(row, index) {
     dealerName: toDisplayValue(row['Assigned Dealer Name'] || row['Selling Dealer Name'] || row.Dealer),
     recallNumber: toDisplayValue(row['Recall Number']),
     externalNumber: toDisplayValue(row['External Number']),
-    startDate: toDisplayValue(row['Start Date']),
-    endDate: toDisplayValue(row['End Date']),
+    startDate: formatDisplayDate(row['Start Date'], toDisplayValue(row['Start Date'])),
+    endDate: formatDisplayDate(row['End Date'], toDisplayValue(row['End Date'])),
     u2h2: toDisplayValue(row.U2H2),
     partCode: toDisplayValue(row['Part L1'], ''),
     partDesc: toDisplayValue(row['Part Desc.'], ''),

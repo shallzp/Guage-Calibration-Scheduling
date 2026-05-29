@@ -15,7 +15,7 @@ const DEFAULT_FILTER_FIELD_KEYS = ['location', 'frequency', 'currentStatus', 'ri
 
 export function GaugeFiltersSkeleton() {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-[color:var(--card)]e p-4 shadow-sm md:p-5">
+    <div className="rounded-2xl border border-slate-200 bg-whitee p-4 shadow-sm md:p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="h-4 w-24 rounded-full bg-slate-200/70 animate-pulse" />
         <div className="h-9 w-28 rounded-lg bg-slate-200/60 animate-pulse" />

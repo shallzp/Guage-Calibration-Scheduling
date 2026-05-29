@@ -1,8 +1,7 @@
+import { statusBadgeStyle } from '../utils/gauge/badgeStyles'
+
 function statusClassName(status) {
-  if (status === 'Completed') return 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-  if (status === 'Overdue') return 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
-  if (status === 'In Progress') return 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
-  return 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
+  return statusBadgeStyle(status) ?? 'bg-slate-100 text-slate-700 border-slate-200'
 }
 
 function StatusUpdater({ status, statusOptions, completionDate, onStatusChange }) {
@@ -12,7 +11,7 @@ function StatusUpdater({ status, statusOptions, completionDate, onStatusChange }
         <select
           value={status}
           onChange={(event) => onStatusChange(event.target.value)}
-          className={`rounded-lg px-2.5 py-2 font-medium outline-none ${statusClassName(status)}`}
+          className={`rounded-lg border px-2.5 py-2 font-medium outline-none ${statusClassName(status)}`}
         >
           {statusOptions.map((option) => (
             <option key={option} value={option}>

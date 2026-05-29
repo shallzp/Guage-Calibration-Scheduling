@@ -9,6 +9,8 @@ import TableSkeleton from '../../components/TableSkeleton'
 import GaugeDataFilter, { GaugeFiltersSkeleton } from './GaugeDataFilter'
 
 import { riskBadgeStyle, statusBadgeStyle } from '../../utils/gauge/badgeStyles'
+import { toDateSortValue } from '../../utils/dateUtils'
+import { getRiskLevelLabel } from '../../utils/gauge/gaugeDataUtils'
 
 const PAGE_SIZE = 10
 
@@ -38,8 +40,8 @@ function RiskBadge({ level }) {
   const style = riskBadgeStyle(normalized)
   if (!style) return <span className="text-slate-400">—</span>
   return (
-    <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold capitalize ${style}`}>
-      {normalized}
+    <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold ${style}`}>
+      {getRiskLevelLabel(normalized)}
     </span>
   )
 }
@@ -57,6 +59,8 @@ function GaugeDataTable({
   const [searchParams, setSearchParams] = useSearchParams()
   const pageParam = parseInt(searchParams.get('page') || '1', 10)
   const currentPage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam
+  const sortParam = searchParams.get('sort')
+  const dirParam = searchParams.get('dir')
 
   const setCurrentPage = (page) => {
     const next = new URLSearchParams(searchParams)
@@ -68,8 +72,8 @@ function GaugeDataTable({
     setSearchParams(next, { replace: true })
   }
 
-  const [sortField, setSortField] = useState(null)
-  const [sortDirection, setSortDirection] = useState('asc')
+  const [sortField, setSortField] = useState(sortParam || null)
+  const [sortDirection, setSortDirection] = useState(dirParam === 'desc' ? 'desc' : 'asc')
 
   const isInitialMount = useRef(true)
   useEffect(() => {
@@ -80,6 +84,21 @@ function GaugeDataTable({
     }
   }, [filters])
 
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (sortField) {
+      next.set('sort', sortField)
+      next.set('dir', sortDirection)
+    } else {
+      next.delete('sort')
+      next.delete('dir')
+    }
+
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [sortDirection, sortField, searchParams, setSearchParams])
+
   const sortedGauges = useMemo(() => {
     if (!sortField) return gauges
     return [...gauges].sort((a, b) => {
@@ -87,9 +106,8 @@ function GaugeDataTable({
       let bVal = b[sortField]
       
       if (sortField === 'dueDate' || sortField === 'lastCompletionDate') {
-        const parseD = (val) => (!val || val === '-' ? 0 : new Date(val).getTime() || 0)
-        aVal = parseD(aVal)
-        bVal = parseD(bVal)
+        aVal = toDateSortValue(aVal)
+        bVal = toDateSortValue(bVal)
       }
       
       if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1

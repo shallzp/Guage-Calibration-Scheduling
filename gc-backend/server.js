@@ -2,6 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const { refreshAllCurrentBatchSummaries } = require('./utils/batchUtils');
 
 dotenv.config();
 
@@ -23,6 +24,11 @@ const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   await connectDB();
+  try {
+    await refreshAllCurrentBatchSummaries();
+  } catch (error) {
+    console.error(`Failed to refresh batch summaries: ${error.message}`);
+  }
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
 

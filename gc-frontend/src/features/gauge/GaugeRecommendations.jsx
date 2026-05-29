@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { PanelRightOpen } from 'lucide-react'
 
-import { addMonthsClamped, formatDate, parseDate } from '../../utils/dateUtils'
+import { addMonthsClamped, formatDate, formatDisplayDate, parseDate, parseDateAny, toDateSortValue } from '../../utils/dateUtils'
 import { apiFetch } from '../../utils/api'
 import { riskBadgeStyle, actionBadgeStyle } from '../../utils/gauge/badgeStyles'
+import { getRiskActionLabel, getRiskLevelLabel } from '../../utils/gauge/gaugeDataUtils'
 
 import TableSkeleton from '../../components/TableSkeleton'
 import Pagination from '../../components/Pagination'
@@ -27,9 +28,7 @@ export function GaugeRecommendationsSkeleton() {
 const PAGE_SIZE = 10
 
 function toDueDateText(value) {
-  const [day, month, year] = String(value || '').split('/')
-  if (!day || !month || !year) return value || '-'
-  return `${day.trim().padStart(2, '0')}/${month.trim().padStart(2, '0')}/${year.trim()}`
+  return formatDisplayDate(value, value || '-')
 }
 
 function toRiskPercent(score, level) {
@@ -50,12 +49,6 @@ function getActionType(action) {
   return 'other'
 }
 
-function getActionLabel(action) {
-  const type = getActionType(action)
-  if (type === 'increase') return 'Increase Frequency'
-  if (type === 'reschedule') return 'Reschedule Date'
-  return action || '—'
-}
 
 function getRecommendedShiftText(gauge) {
   if (gauge?.recommendedFrequency) return `Shift to ${gauge.recommendedFrequency} months`
@@ -67,8 +60,8 @@ function RecommendationDetailPanel({ gauge, onClose, onConfirm, isApplying }) {
   if (!gauge) return null
 
   const riskLevel = String(gauge.riskLevel || '').trim().toLowerCase()
-  const riskLabel = riskLevel ? riskLevel.toUpperCase() : '—'
-  const actionLabel = getActionLabel(gauge.riskAction)
+  const riskLabel = riskLevel ? getRiskLevelLabel(riskLevel) : '—'
+  const actionLabel = getRiskActionLabel(gauge.riskAction)
   const actionType = getActionType(gauge.riskAction)
   const signals = Array.isArray(gauge.riskSignals) && gauge.riskSignals.length
     ? gauge.riskSignals
@@ -106,32 +99,32 @@ function RecommendationDetailPanel({ gauge, onClose, onConfirm, isApplying }) {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Current Due Date</p>
             <p className="mt-2 text-lg font-semibold text-slate-900 sm:text-xl">{toDueDateText(gauge.dueDate)}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Recommended Shift</p>
             <p className="mt-2 text-lg font-semibold text-slate-900 sm:text-xl">{getRecommendedShiftText(gauge)}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Current Frequency</p>
             <p className="mt-2 text-lg font-semibold text-slate-900 sm:text-xl">{gauge.frequency ? `${gauge.frequency} months` : '-'}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Current Status</p>
             <p className="mt-2 text-lg font-semibold text-slate-900 sm:text-xl">{gauge.currentStatus || '—'}</p>
           </div>
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">AI Rationale</p>
           <p className="mt-3 text-sm leading-6 text-slate-700">
             {gauge.riskReason || 'Recommendation generated from gauge history and risk indicators.'}
           </p>
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Signals</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {signals.map((signal) => (
@@ -152,6 +145,8 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
   const [searchParams, setSearchParams] = useSearchParams()
   const pageParam = parseInt(searchParams.get('page') || '1', 10)
   const currentPage = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam
+  const sortParam = searchParams.get('sort')
+  const dirParam = searchParams.get('dir')
 
   const setCurrentPage = (page) => {
     const next = new URLSearchParams(searchParams)
@@ -163,8 +158,8 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     setSearchParams(next, { replace: true })
   }
   const [isApplying, setIsApplying] = useState(false)
-  const [sortField, setSortField] = useState(null)
-  const [sortDirection, setSortDirection] = useState('asc')
+  const [sortField, setSortField] = useState(sortParam || null)
+  const [sortDirection, setSortDirection] = useState(dirParam === 'desc' ? 'desc' : 'asc')
 
   const recommendationRows = useMemo(
     () => gauges.filter((gauge) => ['increase', 'reschedule'].includes(getActionType(gauge.riskAction))),
@@ -229,7 +224,7 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     return recommendationRows.filter((gauge) => {
       if (filters.location !== 'all' && gauge.currentLocation !== filters.location) return false
       if (filters.frequency !== 'all' && String(gauge.frequency) !== filters.frequency) return false
-      if (filters.recommendedAction !== 'all' && getActionLabel(gauge.riskAction) !== filters.recommendedAction) return false
+      if (filters.recommendedAction !== 'all' && getRiskActionLabel(gauge.riskAction) !== filters.recommendedAction) return false
       if (filters.riskLevel !== 'all' && gauge.riskLevel !== filters.riskLevel) return false
       if (!query) return true
       const searchable = [
@@ -249,9 +244,9 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     const getUniqueValues = (key) =>
       Array.from(new Set(recommendationRows.map((gauge) => String(gauge[key] || '')))).filter(Boolean).sort()
 
-    const toSelectOptions = (values, allLabel) => [
+    const toSelectOptions = (values, allLabel, formatter) => [
       { value: 'all', label: allLabel },
-      ...values.map((v) => ({ value: v, label: v })),
+      ...values.map((value) => ({ value, label: formatter ? formatter(value) : value })),
     ]
 
     const frequencyVals = Array.from(new Set(recommendationRows.map((gauge) => String(gauge.frequency))))
@@ -262,10 +257,10 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
       location: toSelectOptions(getUniqueValues('currentLocation'), 'All Locations'),
       frequency: toSelectOptions(frequencyVals, 'All Frequencies'),
       recommendedAction: toSelectOptions(
-        Array.from(new Set(recommendationRows.map((gauge) => getActionLabel(gauge.riskAction)))).filter(Boolean).sort(),
+        Array.from(new Set(recommendationRows.map((gauge) => getRiskActionLabel(gauge.riskAction)))).filter(Boolean).sort(),
         'All Recommended Actions',
       ),
-      riskLevel: toSelectOptions(getUniqueValues('riskLevel'), 'All Risk Levels'),
+      riskLevel: toSelectOptions(getUniqueValues('riskLevel'), 'All Risk Levels', getRiskLevelLabel),
     }
   }, [recommendationRows])
   const filteredCount = filteredRows.length
@@ -281,6 +276,21 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     }
   }, [gauges, filters])
 
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (sortField) {
+      next.set('sort', sortField)
+      next.set('dir', sortDirection)
+    } else {
+      next.delete('sort')
+      next.delete('dir')
+    }
+
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [sortDirection, sortField, searchParams, setSearchParams])
+
   const isLocalFilterActive = isFilterActive || sortField !== null
 
   const sortedRows = useMemo(() => {
@@ -290,12 +300,8 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
       let bVal = b[sortField]
 
       if (sortField === 'dueDate') {
-        const parseDue = (value) => {
-          const parsed = parseDate(value)
-          return parsed ? parsed.getTime() : 0
-        }
-        aVal = parseDue(a.dueDate)
-        bVal = parseDue(b.dueDate)
+        aVal = toDateSortValue(a.dueDate)
+        bVal = toDateSortValue(b.dueDate)
       }
 
       if (sortField === 'riskLevel') {
@@ -380,15 +386,37 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
   }
 
   const patchScheduleDates = async (gaugeKey, shiftedRows) => {
-    for (const { scheduleId, dueDate } of shiftedRows) {
-      if (!scheduleId || !dueDate) continue
-      const response = await apiFetch(`/api/gauges/${encodeURIComponent(gaugeKey)}/schedule/${scheduleId}`, {
-        method: 'PATCH',
+    const updates = shiftedRows
+      .filter(({ scheduleId, dueDate }) => scheduleId && dueDate)
+      .map(({ scheduleId, dueDate }) => ({ scheduleId, due_date: dueDate }))
+
+    if (updates.length === 0) return
+
+    const response = await apiFetch(`/api/gauges/${encodeURIComponent(gaugeKey)}/schedule-bulk`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates }),
+    })
+    if (!response.ok) throw new Error('Failed to bulk-update schedule due dates')
+  }
+
+  const refreshBatchSnapshotsOnly = async (gaugeKey) => {
+    const gaugeResponse = await apiFetch(`/api/gauges/${encodeURIComponent(gaugeKey)}`)
+    if (!gaugeResponse.ok) throw new Error('Failed to load gauge for batch refresh')
+
+    const gauge = await gaugeResponse.json()
+    const batchKeys = (gauge?.batch_keys && typeof gauge.batch_keys === 'object' && !Array.isArray(gauge.batch_keys))
+      ? Object.keys(gauge.batch_keys)
+      : []
+
+    await Promise.all(batchKeys.map(async (batchKey) => {
+      const response = await apiFetch(`/api/batches/${encodeURIComponent(batchKey)}`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ due_date: dueDate }),
+        body: JSON.stringify({ refresh_snapshot_for_gauge: gaugeKey }),
       })
-      if (!response.ok) throw new Error(`Failed to update schedule ${scheduleId}`)
-    }
+      if (!response.ok) throw new Error('Failed to refresh batch snapshots')
+    }))
   }
 
   const applyIncreaseFrequencyRecommendation = async (gauge) => {
@@ -429,7 +457,7 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
     const currentDueDate = parseDate(currentDueDateText)
     if (!currentDueDate) return
 
-    const recommendedDate = parseDate(gauge.recommendedDueDate)
+    const recommendedDate = parseDateAny(gauge.recommendedDueDate) || parseDate(gauge.recommendedDueDate)
     let shiftDays = 1
     if (recommendedDate) {
       const diffMs = recommendedDate.getTime() - currentDueDate.getTime()
@@ -476,6 +504,11 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
       }
 
       closeDrawer()
+
+      // Fire-and-forget: snapshot refresh should not block the UI
+      refreshBatchSnapshotsOnly(selectedGauge.key).catch((error) => {
+        console.error('Failed to refresh batch snapshots:', error)
+      })
     } catch (error) {
       console.error('Failed to apply recommendation:', error)
     } finally {
@@ -513,9 +546,9 @@ function GaugeRecommendations({ gauges = [], onRecommendationApplied, filters, o
               const riskStyle = riskBadgeStyle(riskLevel) || 'bg-slate-100 text-slate-700 border-slate-200'
               const riskPercent = toRiskPercent(gauge.riskScore, riskLevel)
               const riskLabel = riskLevel
-                ? `${riskLevel.toUpperCase()}${riskPercent !== null ? ` (${riskPercent}%)` : ''}`
+                ? `${getRiskLevelLabel(riskLevel)}${riskPercent !== null ? ` (${riskPercent}%)` : ''}`
                 : '—'
-              const actionText = getActionLabel(gauge.riskAction)
+              const actionText = getRiskActionLabel(gauge.riskAction)
 
               return (
                 <tr key={gauge.key} className="border-t border-slate-200/80 text-slate-700">

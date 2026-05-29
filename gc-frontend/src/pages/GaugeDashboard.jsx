@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams, useLocation } from 'react-rout
 import { RefreshCw } from 'lucide-react'
 
 import { applySLAConfigToGauges, processSLAEmails } from '../utils/gauge/slaUtils'
+import { getRiskLevelLabel } from '../utils/gauge/gaugeDataUtils'
 import { apiFetch } from '../utils/api'
 
 import DialogBox from '../components/DialogBox'
@@ -156,9 +157,9 @@ function GaugeDashboard({ gauges, batches = [], allGauges = [], isLoading, isRef
     const getUniqueValues = (key) =>
       Array.from(new Set(gaugesWithSla.map((gauge) => String(gauge[key] || '')))).filter(Boolean).sort()
 
-    const toSelectOptions = (values, allLabel) => [
+    const toSelectOptions = (values, allLabel, formatter) => [
       { value: 'all', label: allLabel },
-      ...values.map(v => ({ value: v, label: v }))
+      ...values.map((value) => ({ value, label: formatter ? formatter(value) : value }))
     ]
 
     const frequencyVals = Array.from(new Set(gaugesWithSla.map((gauge) => String(gauge.frequency)))).filter(Boolean).sort((a, b) => Number(a) - Number(b))
@@ -167,7 +168,7 @@ function GaugeDashboard({ gauges, batches = [], allGauges = [], isLoading, isRef
       location: toSelectOptions(getUniqueValues('currentLocation'), 'All Locations'),
       frequency: toSelectOptions(frequencyVals, 'All Frequencies'),
       currentStatus: toSelectOptions(getUniqueValues('currentStatus'), 'All Statuses'),
-      riskLevel: toSelectOptions(getUniqueValues('riskLevel'), 'All Risk Levels'),
+      riskLevel: toSelectOptions(getUniqueValues('riskLevel'), 'All Risk Levels', getRiskLevelLabel),
     }
   }, [gaugesWithSla])
 

@@ -54,7 +54,7 @@ function FilterSelect({ value, onChange, options, leadingIcon, ariaLabel, compac
       {open && (
         <ul
           role="listbox"
-          className={`absolute z-20 mt-2 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-[0_14px_30px_rgba(15,23,42,0.15)] ${menuClassName}`}
+          className={`absolute z-20 mt-2 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm ${menuClassName}`}
         >
           {options.map((option) => {
             const isSelected = option.value === value
